@@ -36,6 +36,7 @@ from ..kdeconnect import DAEMON_PATH, KdeConnectClient
 from ..models import KdeSnapshot, MediaState, PhoneSnapshot
 from ..phone_context import build_phone_context
 from ..sms import SmsClient
+from ..wifi import WirelessReconnector
 from .agent_panel import AgentPanel
 from .dialogs import ShortcutsDialog
 from .header import HeaderBar
@@ -181,6 +182,14 @@ class MainWindow(QMainWindow):
         self.adb.ringStopped.connect(
             lambda: self._flash("Stopped ringing the phone.")
         )
+
+        self.wifi_reconnect = WirelessReconnector(report.adb_path, self)
+        self.wifi_reconnect.last_address = self._settings.value(
+            "wifi/last_address", "", type=str
+        )
+        self.wifi_reconnect.connected.connect(self._on_wifi_reconnected)
+        self.wifi_reconnect.failed.connect(self._on_wifi_reconnect_failed)
+        self._wifi_failure_shown = False
 
         self.kde = KdeConnectClient(self)
         self.kde.snapshotChanged.connect(self._on_kde_snapshot)
@@ -393,8 +402,16 @@ class MainWindow(QMainWindow):
         self._flash("Checking phone and KDE Connect…")
 
     def _on_phone_snapshot(self, snapshot: PhoneSnapshot) -> None:
+        previous = self._adb_snapshot.selected
         self._adb_snapshot = snapshot
         selected = snapshot.selected
+
+        self._remember_wireless_address(snapshot)
+        if selected is not None:
+            self._wifi_failure_shown = False
+        elif self.wifi_reconnect.last_address and self.wifi_reconnect.reconnect():
+            if previous is not None:
+                self._flash("Phone disconnected — trying Wi-Fi…")
 
         if selected is None:
             if self._mirror_target is not None:
@@ -417,6 +434,36 @@ class MainWindow(QMainWindow):
 
         self._update_header()
         self.notifications.set_snapshot(self._kde_snapshot)
+
+    def _remember_wireless_address(self, snapshot: PhoneSnapshot) -> None:
+        """Keep the last working wireless serial for automatic reconnects."""
+
+        wireless = next(
+            (
+                device
+                for device in snapshot.devices
+                if device.is_wireless and device.state == "device"
+            ),
+            None,
+        )
+        if wireless is None or wireless.serial == self.wifi_reconnect.last_address:
+            return
+        self.wifi_reconnect.last_address = wireless.serial
+        self._settings.setValue("wifi/last_address", wireless.serial)
+        self._settings.sync()
+
+    def _on_wifi_reconnected(self, address: str) -> None:
+        self.wifi_reconnect.last_address = address
+        self._settings.setValue("wifi/last_address", address)
+        self._settings.sync()
+        self._flash("Reconnected to the phone over Wi-Fi.")
+        self.adb.refresh()
+
+    def _on_wifi_reconnect_failed(self, message: str) -> None:
+        if self._wifi_failure_shown:
+            return
+        self._wifi_failure_shown = True
+        self._flash(message)
 
     def _on_media_changed(self, media: MediaState) -> None:
         self._media_state = media

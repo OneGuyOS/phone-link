@@ -12,8 +12,11 @@ import re
 import secrets
 import string
 import subprocess
+import threading
 import time
 from collections.abc import Callable
+
+from PySide6.QtCore import QObject, Signal
 
 from .mdns import WifiService, query_adb_services
 
@@ -27,11 +30,13 @@ __all__ = [
     "CONNECT_SERVICE",
     "PAIRING_SERVICE",
     "WifiService",
+    "WirelessReconnector",
     "find_connect_address",
     "make_qr_pairing",
     "pair_and_connect",
     "pair_with_qr",
     "parse_mdns_services",
+    "pick_reconnect_address",
 ]
 
 
@@ -74,6 +79,144 @@ def find_connect_address(adb_path: str, timeout: float = 3.0) -> str | None:
                 if service.kind == "connect"
             ]
     return connect[-1].address if connect else None
+
+
+def _address_host(address: str) -> str:
+    if address.startswith("["):
+        close = address.find("]")
+        if close != -1:
+            return address[1:close]
+    return address.rsplit(":", 1)[0]
+
+
+def pick_reconnect_address(
+    services: list[WifiService], last_address: str
+) -> str | None:
+    """Pick the previously used phone from the current mDNS advertisements.
+
+    Wireless debugging uses a new port each time it restarts, so an exact
+    match is preferred but a different port on the same host is accepted.
+    Other hosts are ignored: the app must not try to debug a stranger's phone.
+    """
+
+    if not last_address:
+        return None
+    connects = [service for service in services if service.kind == "connect"]
+    for service in connects:
+        if service.address == last_address:
+            return service.address
+    host = _address_host(last_address)
+    if not host:
+        return None
+    for service in connects:
+        if _address_host(service.address) == host:
+            return service.address
+    return None
+
+
+class WirelessReconnector(QObject):
+    """Reconnect to the phone after its wireless ADB transport drops.
+
+    Wireless debugging stays enabled on the phone, but an ADB session can end
+    when USB is unplugged or the phone's Wi-Fi re-associates.  This finds the
+    phone's current port through mDNS and runs ``adb connect`` again, without
+    requiring the user to re-scan the pairing QR code.
+    """
+
+    connected = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        adb_path: str | None,
+        parent: QObject | None = None,
+        *,
+        query: Callable[..., list[WifiService]] | None = None,
+        runner: Callable[..., subprocess.CompletedProcess[str] | None] | None = None,
+        clock: Callable[[], float] | None = None,
+        start: Callable[[], None] | None = None,
+        cooldown: float = 20.0,
+        timeout: float = 3.0,
+    ) -> None:
+        super().__init__(parent)
+        self.adb_path = adb_path or ""
+        self.last_address = ""
+        self._query = query or query_adb_services
+        self._runner = runner or _run
+        self._clock = clock or time.monotonic
+        self._start = start or self._start_thread
+        self.cooldown = cooldown
+        self.timeout = timeout
+        self._last_attempt = float("-inf")
+        self._busy = False
+
+    def reconnect(self) -> bool:
+        """Start one attempt if none is running and the cooldown has passed."""
+
+        if not self.adb_path or not self.last_address or self._busy:
+            return False
+        now = self._clock()
+        if now - self._last_attempt < self.cooldown:
+            return False
+        self._last_attempt = now
+        self._busy = True
+        try:
+            self._start()
+        except Exception:
+            self._busy = False
+            raise
+        return True
+
+    def attempt(self) -> tuple[bool, str]:
+        """Run one synchronous attempt; returns ``(ok, address or error)``."""
+
+        if not self.adb_path:
+            return False, "adb is not available."
+        if not self.last_address:
+            return False, "No Wi-Fi phone has been used yet."
+        services = self._query(timeout=self.timeout)
+        address = pick_reconnect_address(services, self.last_address)
+        if address is None:
+            return False, "The phone was not found on the network."
+        result = self._runner(self.adb_path, ["connect", address], timeout=20.0)
+        if result is None:
+            return False, "Could not run adb to reconnect."
+        text = f"{result.stdout}\n{result.stderr}"
+        lowered = text.lower()
+        failed = any(
+            word in lowered
+            for word in ("failed", "cannot", "unable", "refused", "offline")
+        )
+        if result.returncode != 0 or "connected to" not in lowered or failed:
+            detail = _clean_output(text) or "adb connect failed."
+            return False, f"Could not reconnect to {address}: {detail}"
+        return True, address
+
+    def _start_thread(self) -> None:
+        threading.Thread(
+            target=self._worker,
+            name="phone-link-wifi-reconnect",
+            daemon=True,
+        ).start()
+
+    def _worker(self) -> None:
+        try:
+            ok, detail = self.attempt()
+        except Exception as exc:  # a background thread must not kill the app
+            ok, detail = False, f"Wi-Fi reconnect failed: {exc}"
+        self._busy = False
+        if ok:
+            self.last_address = detail
+            self._emit(self.connected, detail)
+        else:
+            self._emit(self.failed, detail)
+
+    def _emit(self, signal, *args) -> None:
+        try:
+            signal.emit(*args)
+        except RuntimeError:
+            # The QObject can be gone while the worker is ending.
+            pass
 
 
 def make_qr_pairing() -> tuple[str, str, str]:

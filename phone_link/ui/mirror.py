@@ -25,6 +25,16 @@ PHONE_ASPECT = 9.0 / 19.5
 DESKTOP_ASPECT = 16.0 / 9.0
 
 
+def in_app_mirror_audio(enabled: bool, floating_dex: bool) -> bool:
+    """Whether the in-app mirror should forward audio.
+
+    When DeX is popped out, the floating window owns the audio.  Starting the
+    in-app phone mirror with sound too would play the same stream twice.
+    """
+
+    return bool(enabled and not floating_dex)
+
+
 class NativeScreenHost(QWidget):
     """A real X11 window that scrcpy's window can be reparented into."""
 
@@ -538,14 +548,14 @@ class MirrorPanel(QWidget):
             return
         self._floating = True
         self._update_dex_ui()
-        # Audio stays with the in-app mirror; forwarding it twice would play
-        # the same sound over itself.
+        # The floating DeX window carries audio.  The in-app phone mirror is
+        # restarted without sound below, so the stream is not played twice.
         self._float_session.start(
             self._serial,
             0,
             1280,
             720,
-            audio=False,
+            audio=self._audio,
             dex=True,
             floating=True,
         )
@@ -587,6 +597,10 @@ class MirrorPanel(QWidget):
             self.notice.emit(detail or "The DeX window could not open.")
         else:
             self.notice.emit("DeX window closed.")
+        # The in-app mirror was started silent while DeX owned the audio.
+        # Restart it now that it is the only view left.
+        if self._last_snapshot is not None and self._serial is not None:
+            self.start(self._last_snapshot, force=True)
 
     def start(self, snapshot: PhoneSnapshot, force: bool = False) -> None:
         device = snapshot.selected
@@ -668,7 +682,7 @@ class MirrorPanel(QWidget):
             int(host.winId()),
             max(frame.width() - 14, 240),
             max(frame.height() - 14, min_height),
-            audio=self._audio,
+            audio=in_app_mirror_audio(self._audio, self._floating),
             dex=self._shows_desktop,
         )
 

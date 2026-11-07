@@ -43,6 +43,7 @@ from phone_link.notification_store import (
     save_history,
 )
 from phone_link.scrcpy import DEX_DISPLAY, _friendly_failure, build_scrcpy_args
+from phone_link.ui.mirror import in_app_mirror_audio
 from phone_link.ui.notifications import notification_matches
 from phone_link.wifi import make_qr_pairing, parse_mdns_services
 
@@ -708,10 +709,26 @@ class ScrcpyCommandTests(unittest.TestCase):
         # Both transports are lossless, so scrcpy's low-latency default stands.
         self.assertNotIn("--audio-buffer", args)
 
+    def test_floating_dex_can_carry_audio(self) -> None:
+        args = self.build(dex=True, floating=True, audio=True)
+        self.assertNotIn("--no-audio", args)
+
     def test_wireless_audio_uses_the_default_buffer(self) -> None:
         args = self.build(serial="192.168.1.50:5555", audio=True)
         self.assertNotIn("--no-audio", args)
         self.assertNotIn("--audio-buffer", args)
+
+
+class DeXAudioTests(unittest.TestCase):
+    def test_in_app_mirror_keeps_audio_while_dex_is_embedded(self) -> None:
+        self.assertTrue(in_app_mirror_audio(True, False))
+
+    def test_floating_dex_owns_the_audio(self) -> None:
+        self.assertFalse(in_app_mirror_audio(True, True))
+
+    def test_speaker_off_means_no_audio_anywhere(self) -> None:
+        self.assertFalse(in_app_mirror_audio(False, False))
+        self.assertFalse(in_app_mirror_audio(False, True))
 
 
 if __name__ == "__main__":

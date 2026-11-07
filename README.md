@@ -349,6 +349,14 @@ cable to make the mirror use Wi-Fi. To force a particular device:
 PHONE_LINK_SERIAL=192.168.1.50:5555 ./run.sh
 ```
 
+Phone Link remembers the last wireless address. If that transport drops — for
+example when USB is unplugged and Android restarts `adbd` — the app looks for
+the same phone over mDNS, accepts a new wireless-debugging port on the same
+host, and runs `adb connect` again. It does not re-pair and does not connect to
+other ADB devices it happens to see. If the phone has moved to a different IP
+address, or Wireless debugging was switched off, use the Wi-Fi button to pair
+again.
+
 The full Wi-Fi path was verified on a real phone: the phone scanned the
 in-app QR code, Phone Link paired and connected, USB was unplugged, and scrcpy
 mirrored over the wireless transport.
@@ -732,6 +740,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   Phone Link found the matching pairing service, ran `adb pair`, discovered the
   connection port, and ran `adb connect`; after USB was unplugged, scrcpy was
   running as `scrcpy --serial 192.168.2.104:45113` and the mirror stayed live.
+- Automatic wireless reconnect: with the phone paired and its address stored,
+  `adb disconnect` removed the transport; the next poll found the same phone
+  through Phone Link's mDNS query and ran `adb connect` again without a new QR
+  pairing.
 - scrcpy receives an already laid-out phone-frame size at startup instead of
   the unlaid-out 100×30 default.
 - Mirror audio: toggling the speaker button in the mock run restarted the
@@ -779,10 +791,12 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 187 unit tests covering ADB parsing and selection, name/battery parsing,
+- 202 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
-  windows, notification fallbacks, KDE snapshot state, recent-history ordering,
+  windows, automatic wireless reconnection (same host, changed port, other
+  hosts ignored, cooldown), which mirror owns DeX audio, notification
+  fallbacks, KDE snapshot state, recent-history ordering,
   bounds and persistence, the owner-only atomic history file (including corrupt
   and partial records), notification search matching, install-command targeting
   (including python3-segno) and failure-message filtering, clipboard echo
@@ -974,6 +988,13 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   the phone cannot capture audio, the mirror reports the failure and the speaker
   button can be switched off to reconnect without sound. Changing the setting
   restarts scrcpy, so the mirror blanks for a second or two.
+- **DeX audio** follows Samsung's media routing. DeX can send its sound to the
+  virtual DeX display instead of the phone output, which leaves the computer
+  silent even though the speaker button is on. In the phone's Quick Settings,
+  open **Media output** and choose **This phone**. While DeX is embedded, the
+  same scrcpy session carries the sound. When DeX is popped out, the floating
+  DeX window carries it and the in-app phone mirror is started without audio,
+  so the stream is not played twice.
 - **Now playing** uses KDE Connect's MPRIS remote plugin. It controls whichever
   player the phone reports as current; if several media apps are active, the
   phone decides which one. Position is refreshed once a second while playing, so
