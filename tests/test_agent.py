@@ -38,6 +38,7 @@ from phone_link.agent import (
     provider_key,
     save_file_blocks,
     save_store,
+    share_builtin_prompt,
     sse_payloads,
 )
 
@@ -360,6 +361,44 @@ class StoreTests(unittest.TestCase):
             )
             store = load_store(path)
             self.assertEqual(store.by_id("zara-fast").system_prompt, DEFAULT_SYSTEM_PROMPT)
+
+    def test_builtin_providers_share_one_personality(self) -> None:
+        store = AgentStore(
+            providers=[
+                Provider(id="zara-fast", label="Zara Fast", builtin=True),
+                Provider(id="phone", label="Phone server", builtin=True),
+                Provider(
+                    id="custom-1",
+                    label="Custom",
+                    builtin=False,
+                    system_prompt="Keep me",
+                ),
+            ]
+        )
+        edited = store.by_id("zara-fast")
+        edited.system_prompt = "Shared personality"
+        share_builtin_prompt(store, edited)
+        self.assertEqual(store.by_id("phone").system_prompt, "Shared personality")
+        self.assertEqual(store.by_id("custom-1").system_prompt, "Keep me")
+
+    def test_custom_provider_does_not_rewrite_the_builtins(self) -> None:
+        store = AgentStore(
+            providers=[
+                Provider(id="zara-fast", label="Zara Fast", builtin=True),
+                Provider(id="phone", label="Phone server", builtin=True),
+                Provider(
+                    id="custom-1",
+                    label="Custom",
+                    builtin=False,
+                    system_prompt="Custom voice",
+                ),
+            ]
+        )
+        before = [provider.system_prompt for provider in store.providers]
+        share_builtin_prompt(store, store.by_id("custom-1"))
+        self.assertEqual(
+            [provider.system_prompt for provider in store.providers], before
+        )
 
     def test_broken_config_falls_back_to_presets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

@@ -272,6 +272,21 @@ def provider_key(provider: Provider) -> str:
     return provider.api_key.strip()
 
 
+def share_builtin_prompt(store: AgentStore, provider: Provider) -> None:
+    """Give the built-in providers one personality.
+
+    Editing the prompt of a built-in provider applies it to the other
+    built-ins too, so Zara Fast and the phone server answer in the same
+    voice.  Custom and CLI providers keep their own prompts.
+    """
+
+    if not provider.builtin:
+        return
+    for other in store.providers:
+        if other.builtin:
+            other.system_prompt = provider.system_prompt
+
+
 # --------------------------------------------------------------------------
 # Files the assistant writes
 #

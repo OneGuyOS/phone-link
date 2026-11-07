@@ -14,7 +14,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication, QLabel
 
-from phone_link.agent import FILES_ENV, AgentStore, Provider
+from phone_link.agent import FILES_ENV, AgentStore, ChatMessage, Provider
 from phone_link.ui import agent_panel as agent_panel_module
 from phone_link.ui.agent_panel import AgentPanel, ChatInput
 
@@ -43,6 +43,14 @@ class AgentPanelTests(unittest.TestCase):
         )
         self.loader.start()
         self.addCleanup(self.loader.stop)
+        self.chat_loader = mock.patch.object(
+            agent_panel_module, "load_messages", return_value=[]
+        )
+        self.chat_loader.start()
+        self.addCleanup(self.chat_loader.stop)
+        self.chat_saver = mock.patch.object(agent_panel_module, "save_messages")
+        self.saved = self.chat_saver.start()
+        self.addCleanup(self.chat_saver.stop)
         self.panel = AgentPanel(None)
         self.panel.show()
         self.addCleanup(self.panel.close)
@@ -80,6 +88,38 @@ class AgentPanelTests(unittest.TestCase):
         self.panel.new_chat()
         self.assertEqual(self._bubble_roles(), [])
         self.assertEqual(self.panel.input.toPlainText(), "")
+        self.saved.assert_called_with([])
+
+    def test_sending_records_the_turn_and_earlier_chat(self) -> None:
+        provider = Provider(
+            id="fake",
+            label="Fake local",
+            kind="openai",
+            base_url="http://127.0.0.1:9/v1",
+            model="fake",
+        )
+        self.store.providers = [provider]
+        self.store.active_id = "fake"
+        self.panel._provider = provider
+        self.panel._messages = [ChatMessage("assistant", "earlier")]
+        self.panel.input.setPlainText("next")
+        with mock.patch.object(agent_panel_module, "HttpChat") as http:
+            self.panel.send()
+        expected = [
+            ChatMessage("assistant", "earlier"),
+            ChatMessage("user", "next"),
+        ]
+        self.saved.assert_called_with(expected)
+        self.assertEqual(http.return_value.start.call_args.args[1], expected)
+
+    def test_reply_is_added_to_the_saved_transcript(self) -> None:
+        self.panel._messages = [ChatMessage("user", "hi")]
+        bubble = self.panel._add_bubble("assistant")
+        self.panel._bubble = bubble
+        self.panel._finish("hello there", None, False)
+        self.saved.assert_called_with(
+            [ChatMessage("user", "hi"), ChatMessage("assistant", "hello there")]
+        )
 
     def test_zara_fast_starts_the_managed_server_before_sending(self) -> None:
         provider = Provider(
@@ -156,6 +196,28 @@ class AgentPanelTests(unittest.TestCase):
         self.assertTrue(self.panel.input.isEnabled())
         self.assertEqual(self._bubble_roles(), ["error"])
 
+    def test_phone_sees_the_conversation_the_laptop_had(self) -> None:
+        self._select_phone()
+        self.panel._messages = [
+            ChatMessage("user", "asked on the laptop"),
+            ChatMessage("assistant", "answered on the laptop"),
+        ]
+        self.panel.input.setPlainText("what did we say?")
+        with mock.patch.object(
+            self.panel.phone_starter, "is_ready", return_value=True
+        ):
+            with mock.patch.object(agent_panel_module, "HttpChat") as http:
+                self.panel.send()
+        sent = http.return_value.start.call_args.args[1]
+        self.assertEqual(
+            [message.text for message in sent],
+            [
+                "asked on the laptop",
+                "answered on the laptop",
+                "what did we say?",
+            ],
+        )
+
 
     def test_reply_file_blocks_are_saved_and_reported(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -178,6 +240,55 @@ class AgentPanelTests(unittest.TestCase):
             self.assertEqual(list(Path(folder).iterdir()), [])
         tools = bubble.findChildren(QLabel, "AgentTool")
         self.assertTrue(any("Could not save" in label.text() for label in tools))
+
+
+class RestoreTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_saved_messages_are_shown_at_startup(self) -> None:
+        store = AgentStore(
+            providers=[
+                Provider(
+                    id="fake",
+                    label="Fake local",
+                    kind="openai",
+                    base_url="http://127.0.0.1:9/v1",
+                    model="",
+                )
+            ],
+            active_id="fake",
+        )
+        saved = [
+            ChatMessage("user", "earlier question"),
+            ChatMessage("assistant", "earlier answer"),
+        ]
+        with mock.patch.object(
+            agent_panel_module, "load_store", return_value=store
+        ):
+            with mock.patch.object(
+                agent_panel_module, "load_messages", return_value=list(saved)
+            ):
+                with mock.patch.object(agent_panel_module, "save_messages"):
+                    panel = AgentPanel(None)
+                    panel.show()
+                    self.addCleanup(panel.close)
+                    roles = []
+                    texts = []
+                    for index in range(
+                        panel._messages_layout.count()
+                    ):
+                        widget = panel._messages_layout.itemAt(index).widget()
+                        if (
+                            widget is not None
+                            and widget.objectName() == "AgentBubble"
+                        ):
+                            roles.append(widget.property("role"))
+                            texts.append(widget.text_label.text())
+        self.assertEqual(panel._messages, saved)
+        self.assertEqual(roles, ["user", "assistant"])
+        self.assertEqual(texts, ["earlier question", "earlier answer"])
 
 
 class ChatInputTests(unittest.TestCase):

@@ -44,7 +44,9 @@ from ..agent import (
     probe,
     save_file_blocks,
     save_store,
+    share_builtin_prompt,
 )
+from ..chat_store import context_messages, load_messages, save_messages
 from ..local_server import LocalServer
 from ..phone_server import PhoneStarter
 from .theme import ACCENT, SUCCESS
@@ -246,6 +248,7 @@ class AgentPanel(QWidget):
 
         self._reload_providers()
         self._update_status()
+        self._restore_chat()
 
     # -- providers ---------------------------------------------------------
 
@@ -342,6 +345,17 @@ class AgentPanel(QWidget):
         bar = self.scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
 
+    def _restore_chat(self) -> None:
+        self._messages = load_messages()
+        for message in self._messages:
+            self._add_bubble(message.role, message.text)
+
+    def _save_chat(self) -> None:
+        try:
+            save_messages(self._messages)
+        except OSError:
+            pass
+
     def new_chat(self) -> None:
         self.stop()
         self._messages = []
@@ -351,6 +365,7 @@ class AgentPanel(QWidget):
             if widget is not None:
                 widget.deleteLater()
         self.input.clear()
+        self._save_chat()
         self.input.setFocus()
 
     def _focus_input(self) -> None:
@@ -470,6 +485,7 @@ class AgentPanel(QWidget):
         self.input.clear()
         self._messages.append(ChatMessage("user", text))
         self._add_bubble("user", text)
+        self._save_chat()
         bubble = self._add_bubble("assistant", "")
         self._bubble = bubble
         self._set_streaming(True)
@@ -481,7 +497,7 @@ class AgentPanel(QWidget):
             chat.failed.connect(self._on_failed)
             chat.stopped.connect(self._on_stopped)
             self._chat = chat
-            chat.start(provider, list(self._messages))
+            chat.start(provider, context_messages(self._messages))
         else:
             executable = cli_executable(provider.kind)
             if executable is None:
@@ -498,7 +514,11 @@ class AgentPanel(QWidget):
             chat.failed.connect(self._on_failed)
             chat.stopped.connect(self._on_stopped)
             self._chat = chat
-            chat.start(provider, list(self._messages), executable=executable)
+            chat.start(
+                provider,
+                context_messages(self._messages),
+                executable=executable,
+            )
 
     def stop(self) -> None:
         if self._pending_local_send:
@@ -557,6 +577,7 @@ class AgentPanel(QWidget):
             self._bubble.append_text("\n\n[stopped]")
         if text.strip():
             self._messages.append(ChatMessage("assistant", text))
+            self._save_chat()
             if not stopped and self._provider.kind == "openai":
                 for saved in save_file_blocks(text):
                     if saved.error:
@@ -837,6 +858,7 @@ class AgentSettingsDialog(QDialog):
         provider.system_prompt = self.prompt_edit.toPlainText().strip()
         if not provider.system_prompt:
             provider.system_prompt = DEFAULT_SYSTEM_PROMPT
+        share_builtin_prompt(self._store, provider)
 
     def _sync_kind(self) -> None:
         kind = self.kind_combo.currentData()

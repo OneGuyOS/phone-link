@@ -338,8 +338,27 @@ built-in providers are the intended defaults.
 
 Both built-in providers share the same default system prompt, and when the
 same `.gguf` is on both machines they run the same weights, so the assistant
-behaves the same whichever one is selected. The assistant can also save files
-on this computer; see [Saving files](#saving-files).
+behaves the same whichever one is selected. Editing the system prompt of one
+built-in provider copies it to the other, so the two keep one personality.
+The assistant can also save files on this computer; see
+[Saving files](#saving-files).
+
+### One conversation on both models
+
+The agent tab has a single transcript, not one per provider. Whatever you type
+and whatever the assistant replies is sent to whichever built-in provider you
+pick next, so the laptop model and the phone model always know what the other
+said — switching to the phone model mid-conversation continues the same
+discussion instead of starting over.
+
+The transcript is saved to `~/.local/share/phone-link/chat.json` (mode `0600`,
+next to `agent.json`) after every turn and restored when the window opens, so
+it survives restarts. The file keeps the latest 200 messages; the most recent
+ones that fit roughly 12,000 characters are sent with each request, leaving
+room for the reply under the 4096-token context. **New chat** clears the
+visible conversation and the saved file. The transcript is local to this
+computer: it is never uploaded, and no provider other than the one you select
+receives it.
 
 ### Backends
 
@@ -634,7 +653,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 149 unit tests covering ADB parsing and selection, name/battery parsing,
+- 165 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -661,8 +680,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   stop against a fake server process, the panel's wait-for-local-server state,
   saving files from a reply, starting the phone server through a fake ADB
   (forward, Termux check, keyguard detection, typed command, timeout), the
-  panel's wait-for-phone state, ADB forward direction, plus headless panel and
-  composer tests).
+  panel's wait-for-phone state, the saved transcript (owner-only atomic file,
+  corrupt and invalid records, the stored and context limits), one prompt
+  shared by the built-in providers, the panel restoring and saving turns, and
+  the phone provider receiving the conversation the laptop had, plus headless
+  panel and composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
   counts, and loaded thread pages 50 messages at a time using
@@ -701,6 +723,12 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   over ADB — typing the script and pressing Enter — had the endpoint ready in
   about 10 seconds, and streamed the reply in about 24 seconds total. The
   `llama-server` process stayed up afterward.
+- One transcript across both models, live: through the real panel, a first
+  message to **Zara Fast** asked it to remember a number; the provider was
+  then switched to **Phone server** and asked for that number, and the phone
+  model answered with it. The transcript file was written with mode `0600` and
+  held all four turns, and a second panel started from the same data directory
+  restored all four as bubbles.
 
 ### What was not tested
 
