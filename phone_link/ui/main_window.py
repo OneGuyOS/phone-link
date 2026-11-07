@@ -14,17 +14,22 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QMainWindow,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QStatusBar,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
 from ..adb import AdbMonitor
+from ..autostart import is_enabled as autostart_enabled
+from ..autostart import set_enabled as set_autostart
 from ..clipboard_sync import ClipboardSyncGate
 from ..dependencies import DependencyReport
 from ..kdeconnect import DAEMON_PATH, KdeConnectClient
@@ -60,6 +65,9 @@ class MainWindow(QMainWindow):
         self._adb_snapshot = PhoneSnapshot(error="Looking for a phone over ADB…")
         self._kde_snapshot = KdeSnapshot(mode="offline", message="Starting KDE Connect client…")
         self._mirror_target: str | None = None
+        self._tray: QSystemTrayIcon | None = None
+        self._tray_hint_shown = False
+        self._really_quitting = False
 
         root_widget = QWidget(self)
         root_widget.setObjectName("Root")
@@ -226,6 +234,68 @@ class MainWindow(QMainWindow):
         self._adb_timer.start()
         self._update_header()
         self._install_shortcuts()
+        self._setup_tray()
+
+    # -- tray --------------------------------------------------------------
+
+    def _setup_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        tray = QSystemTrayIcon(app_icon(), self)
+        tray.setToolTip("Phone Link")
+        menu = QMenu(self)
+        show_action = menu.addAction("Show Phone Link")
+        show_action.triggered.connect(self._show_from_tray)
+        self._autostart_action = menu.addAction("Start at login")
+        self._autostart_action.setCheckable(True)
+        self._autostart_action.setChecked(autostart_enabled())
+        self._autostart_action.toggled.connect(self._toggle_autostart)
+        menu.addSeparator()
+        quit_action = menu.addAction("Quit Phone Link")
+        quit_action.triggered.connect(self.quit_app)
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._tray_activated)
+        tray.show()
+        self._tray = tray
+
+    def _tray_activated(
+        self, reason: QSystemTrayIcon.ActivationReason
+    ) -> None:
+        if reason != QSystemTrayIcon.ActivationReason.Trigger:
+            return
+        if self.isVisible() and not self.isMinimized():
+            self.hide()
+        else:
+            self._show_from_tray()
+
+    def _show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _toggle_autostart(self, checked: bool) -> None:
+        try:
+            set_autostart(checked)
+        except OSError as exc:
+            self._flash(f"Could not update autostart: {exc}")
+            self._autostart_action.blockSignals(True)
+            self._autostart_action.setChecked(not checked)
+            self._autostart_action.blockSignals(False)
+            return
+        self._flash(
+            "Phone Link will start at login."
+            if checked
+            else "Phone Link will not start at login."
+        )
+
+    def quit_app(self) -> None:
+        """Leave the tray for good, running the normal shutdown."""
+
+        self._really_quitting = True
+        self.close()
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
 
     def _install_shortcuts(self) -> None:
         self._shortcuts: list[QShortcut] = []
@@ -240,7 +310,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+Shift+A", self._toggle_right_tab),
             ("F11", self._toggle_fullscreen),
             ("F1", self._show_shortcuts),
-            ("Ctrl+Q", self.close),
+            ("Ctrl+Q", self.quit_app),
             ("Ctrl+W", self.close),
         ):
             shortcut = QShortcut(QKeySequence(keys), self)
@@ -722,6 +792,22 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.sync()
+        if self._tray is not None and not self._really_quitting:
+            self.hide()
+            event.ignore()
+            if (
+                not self._tray_hint_shown
+                and QSystemTrayIcon.supportsMessages()
+            ):
+                self._tray_hint_shown = True
+                self._tray.showMessage(
+                    "Phone Link is still running",
+                    "It is in the system tray. Choose Quit Phone Link there "
+                    "to exit.",
+                    app_icon(),
+                    6000,
+                )
+            return
         self._clipboard_timer.stop()
         self._adb_timer.stop()
         self.mirror.stop()

@@ -69,6 +69,10 @@ Windows Phone Link. One window contains:
   See [Agent chat](#agent-chat).
 - **Top bar:** phone name, **USB or Wi-Fi** transport, battery level and charging
   state.
+- **Tray:** closing the window hides Phone Link to the system tray instead of
+  quitting, so the mirror, phone polling and a local model it started stay
+  available. The tray menu shows the window again, starts Phone Link at login,
+  or quits for good. See [System tray and login](#system-tray-and-login).
 
 Mouse clicks, touch input and keyboard events go to the real scrcpy window, so
 the usual scrcpy controls apply. There is no custom Android companion app.
@@ -123,7 +127,8 @@ The status bar mentions them at startup, and **F1** opens the in-app list.
 | `Esc` | Clear the search while it is focused |
 | `F11` | Toggle full screen |
 | `F1` | Show the keyboard shortcut list |
-| `Ctrl+Q` or `Ctrl+W` | Close Phone Link |
+| `Ctrl+Q` | Quit Phone Link |
+| `Ctrl+W` | Hide Phone Link to the system tray |
 
 Phone Link remembers the window size, position and maximized/full-screen state
 between runs. If a display that held the window is gone, it moves the window
@@ -255,6 +260,26 @@ available. Do not force `QT_QPA_PLATFORM=wayland`; if you need to be explicit:
 ```bash
 QT_QPA_PLATFORM=xcb ./run.sh
 ```
+
+---
+
+## System tray and login
+
+Closing the Phone Link window — the window's close button, `Ctrl+W`, or the
+window manager — hides it to the system tray rather than quitting. Phone
+polling, the mirror and a local model started by the app keep running, and the
+tray icon brings the window back with a click. Choose **Quit Phone Link** in
+the tray menu (or press `Ctrl+Q`) to run the normal shutdown, which also stops
+a local `llama-server` that Phone Link started.
+
+The tray menu's **Start at login** item writes one per-user file,
+`~/.config/autostart/phone-link.desktop` (or under `$XDG_CONFIG_HOME`). It
+launches the same Python interpreter as the running copy, with the checkout as
+its working directory; unticking the item removes the file. Nothing is
+installed system-wide.
+
+On a desktop without a system tray, the icon cannot be registered and closing
+the window quits as before.
 
 ---
 
@@ -677,7 +702,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 177 unit tests covering ADB parsing and selection, name/battery parsing,
+- 185 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -709,7 +734,9 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   shared by the built-in providers, the panel restoring and saving turns, and
   the phone provider receiving the conversation the laptop had, the phone
   snapshot (device, media, capped notifications and unread texts, truncation,
-  and the built-in-only rule), plus headless panel and composer tests).
+  and the built-in-only rule), close-to-tray (hiding, the one-time hint, quit
+  marking the window first), the autostart entry (XDG path, quoting, enable and
+  disable), plus headless panel and composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
   counts, and loaded thread pages 50 messages at a time using
@@ -759,6 +786,13 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   (79% battery, 27 active notifications and 26 unread text conversations, with
   the documented caps), **Zara Fast** answered "79%" to a battery question,
   and `chat.json` held only the question and reply — no phone content.
+- System tray on the live Plasma Wayland session: Qt reported a tray available
+  and the running app registered its `StatusNotifierItem` with the tray watcher
+  (pid 42911). Close-to-tray and the one-time hint were covered with a fake
+  tray in the unit tests; this session had no Wayland window-automation tool to
+  click the icon and restore a genuinely hidden window. Autostart was exercised
+  against a temporary `XDG_CONFIG_HOME`, so nothing was enabled on this
+  computer.
 
 ### What was not tested
 
@@ -804,6 +838,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 
 - KDE Connect must be installed and running; Phone Link does not reimplement the
   protocol or replace the Android app.
+- **Tray and autostart:** close-to-tray requires a system tray
+  (StatusNotifier/AppIndicator) in the desktop session; without one, closing
+  the window quits. The autostart entry is per-user and records the current
+  Python interpreter and checkout path, so moving either means toggling it off
+  and on again in the tray menu.
 - Agent chat keeps one transcript shared by the built-in providers in
   `chat.json` (latest 200 messages, mode `0600`, not encrypted). The whole
   transcript that fits the context budget is resent each turn; a custom CLI

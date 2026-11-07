@@ -103,7 +103,8 @@ class ShortcutsDialog(QDialog):
         ("Esc", "Clear the search while it has focus"),
         ("F11", "Toggle full screen"),
         ("F1", "Show this shortcut list"),
-        ("Ctrl+Q / Ctrl+W", "Close Phone Link"),
+        ("Ctrl+Q", "Quit Phone Link"),
+        ("Ctrl+W", "Hide Phone Link to the system tray"),
     )
 
     def __init__(self, parent: QWidget | None = None) -> None:
