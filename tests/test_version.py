@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class VersionTests(unittest.TestCase):
     def test_package_version(self) -> None:
-        self.assertEqual(phone_link.__version__, "1.1.1")
+        self.assertEqual(phone_link.__version__, "1.2.0")
 
     def test_command_line_version(self) -> None:
         environment = dict(os.environ)
@@ -29,7 +29,7 @@ class VersionTests(unittest.TestCase):
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "Phone Link 1.1.1")
+        self.assertEqual(result.stdout.strip(), "Phone Link 1.2.0")
         self.assertEqual(result.stderr.strip(), "")
 
 
