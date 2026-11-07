@@ -284,6 +284,70 @@ def main() -> int:
                 popout.isVisible(),
             )
 
+            # The app picker lists packages from the fake ADB and filters them.
+            from phone_link.ui.app_stream import AppStreamDialog
+
+            picker = AppStreamDialog(
+                window.report.adb_path,
+                window._adb_snapshot.selected.serial,
+                window,
+            )
+            picker_loaded = wait_until(lambda: picker.app_list.count() >= 3)
+            picker.search.setText("demo")
+            picker_filtered = wait_until(lambda: picker.app_list.count() == 1)
+            picker.app_list.setCurrentRow(0)
+            print(
+                "APP_PICKER",
+                picker_loaded,
+                picker_filtered,
+                picker.selected_package(),
+                picker.status.text(),
+            )
+            picker.deleteLater()
+
+            apps = window.mirror.apps
+            window.mirror.stream_app("com.example.demo")
+            app_on = wait_until(
+                lambda: window.mirror.is_mirroring
+                and window.mirror._session._app == "com.example.demo"
+                and not window.mirror._session._dex
+            )
+            print(
+                "APP_STREAM",
+                app_on,
+                window.mirror.is_app_streaming,
+                window.mirror.app_package,
+                apps.text(),
+                window.mirror.stage.is_desktop,
+                window.mirror._session._app,
+            )
+
+            # Navigation must address the app's virtual display, not the
+            # phone's main display.
+            SCRCPY_KEYS.unlink(missing_ok=True)
+            window.mirror.nav.buttons["home"].click()
+            nav_app = wait_until(
+                lambda: SCRCPY_KEYS.exists()
+                and "alt+h" in SCRCPY_KEYS.read_text(encoding="utf-8"),
+                timeout=4.0,
+            )
+            print("NAV_APP", nav_app)
+
+            apps.click()
+            app_off = wait_until(
+                lambda: window.mirror.is_mirroring
+                and not window.mirror.is_app_streaming
+                and window.mirror._session._app is None
+                and apps.text() == "Apps"
+            )
+            print(
+                "APP_STOP",
+                app_off,
+                window.mirror.is_app_streaming,
+                window.mirror._session._app,
+                apps.text(),
+            )
+
             rotate = window.mirror.rotate
             print(
                 "ROTATE_READY",

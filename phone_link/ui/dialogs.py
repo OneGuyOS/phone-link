@@ -97,6 +97,7 @@ class ShortcutsDialog(QDialog):
         ("Ctrl+Shift+R", "Rotate the mirrored screen between portrait and landscape"),
         ("Ctrl+Shift+D", "Switch the mirror between the phone screen and Samsung DeX"),
         ("Ctrl+Shift+P", "Pop the DeX desktop out into its own window, or dock it"),
+        ("Ctrl+Shift+O", "Open an installed app on its own virtual display, or stop it"),
         ("Ctrl+F", "Focus the notification search box"),
         ("Ctrl+Shift+M", "Open the SMS messages tab"),
         ("Ctrl+Shift+A", "Switch the right panel between notifications and the agent"),

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..apps import is_valid_package
 from ..models import PhoneSnapshot
 from ..scrcpy import ScrcpySession
 from .icons import empty_state_pixmap, glyph_icon, glyph_pixmap
@@ -216,6 +217,7 @@ class MirrorPanel(QWidget):
     retryRequested = Signal()
     rotationFailed = Signal(str)
     notice = Signal(str)
+    appsRequested = Signal()
 
     def __init__(
         self,
@@ -239,6 +241,10 @@ class MirrorPanel(QWidget):
         self._audio = bool(self._settings.value("mirror/audio", False, type=bool))
         self._dex = bool(self._settings.value("mirror/dex", False, type=bool))
         self._floating = False
+        # App streaming is deliberately transient: unlike DeX it is not
+        # remembered across restarts.
+        self._app_package: str | None = None
+        self._app_label = ""
         self._last_snapshot: PhoneSnapshot | None = None
         # A rotation command takes a moment to reach the phone.  Do not let an
         # in-flight poll snap the frame back to the old orientation.
@@ -283,6 +289,20 @@ class MirrorPanel(QWidget):
         self.desktop.clicked.connect(self._on_desktop_clicked)
         self.desktop.setEnabled(False)
         strip.addWidget(self.desktop)
+
+        self.apps = QToolButton(self)
+        self.apps.setObjectName("AppsButton")
+        self.apps.setIcon(glyph_icon("apps", MUTED, 16))
+        self.apps.setIconSize(QSize(16, 16))
+        self.apps.setText("Apps")
+        self.apps.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.apps.setToolTip(
+            "Open an installed Android app on its own virtual display (Ctrl+Shift+O)"
+        )
+        self.apps.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.apps.clicked.connect(self._on_apps_clicked)
+        self.apps.setEnabled(False)
+        strip.addWidget(self.apps)
 
         self.popout = QToolButton(self)
         self.popout.setObjectName("PopoutButton")
@@ -366,6 +386,14 @@ class MirrorPanel(QWidget):
         return self._floating
 
     @property
+    def app_package(self) -> str | None:
+        return self._app_package
+
+    @property
+    def is_app_streaming(self) -> bool:
+        return self._app_package is not None
+
+    @property
     def _shows_desktop(self) -> bool:
         """True while the in-app view is DeX (not the floating window)."""
 
@@ -413,15 +441,16 @@ class MirrorPanel(QWidget):
     def _on_nav_action(self, action: str) -> None:
         """Route navigation to the display currently shown.
 
-        While DeX is embedded, ``adb shell input keyevent`` targets the
-        phone's main display, not the virtual desktop.  scrcpy's own
-        MOD+b/h/s shortcuts act on the display the session owns, so use those.
+        While DeX or an app stream is embedded, ``adb shell input keyevent``
+        targets the phone's main display, not the virtual display.  scrcpy's
+        own MOD+b/h/s shortcuts act on the display the session owns, so use
+        those.
         """
 
         shortcut = self._NAV_SHORTCUTS.get(action)
         if (
             shortcut
-            and self._shows_desktop
+            and (self._shows_desktop or self._app_package is not None)
             and self._session.send_shortcut(shortcut)
         ):
             return
@@ -461,15 +490,34 @@ class MirrorPanel(QWidget):
 
     def _set_mode_enabled(self, enabled: bool) -> None:
         self.desktop.setEnabled(enabled)
+        # Stop app stays available even if the phone dropped, so the mode can
+        # always be left behind.
+        self.apps.setEnabled(enabled or self._app_package is not None)
         self.popout.setEnabled(enabled and self._dex)
 
     def _update_dex_ui(self) -> None:
+        streaming = self._app_package is not None
         self.desktop.setChecked(self._dex)
         self.popout.setVisible(self._dex)
         self.popout.setChecked(self._floating)
         self.popout.setText("Dock" if self._floating else "Pop out")
         self.stage.set_desktop(self._shows_desktop)
-        self.title_label.setText("SAMSUNG DEX" if self._shows_desktop else "MIRRORED SCREEN")
+        if streaming:
+            self.title_label.setText("APP STREAM")
+        elif self._shows_desktop:
+            self.title_label.setText("SAMSUNG DEX")
+        else:
+            self.title_label.setText("MIRRORED SCREEN")
+        self.title_label.setToolTip(self._app_label if streaming else "")
+        self.apps.setText("Stop app" if streaming else "Apps")
+        self.apps.setToolTip(
+            "Stop the streamed app and return to the phone mirror"
+            if streaming
+            else "Open an installed Android app on its own virtual display (Ctrl+Shift+O)"
+        )
+        self.apps.setIcon(
+            glyph_icon("close" if streaming else "apps", SUCCESS if streaming else MUTED, 16)
+        )
         if self._dex:
             self.desktop.setToolTip(
                 "Return to the phone screen (restarts the mirror)"
@@ -507,6 +555,11 @@ class MirrorPanel(QWidget):
         enabled = bool(enabled)
         if enabled == self._dex:
             return
+        if enabled:
+            # DeX and an app stream both own a virtual display; only one can
+            # occupy the frame.
+            self._app_package = None
+            self._app_label = ""
         self._dex = enabled
         self._settings.setValue("mirror/dex", self._dex)
         self._settings.sync()
@@ -525,6 +578,51 @@ class MirrorPanel(QWidget):
     def _on_desktop_clicked(self, _checked: bool = False) -> None:
         # The button is checkable; set_desktop owns the canonical state.
         self.set_desktop(self.desktop.isChecked())
+
+    def _on_apps_clicked(self) -> None:
+        if self._app_package is not None:
+            self.stop_app_stream()
+        else:
+            self.appsRequested.emit()
+
+    def stream_app(self, package: str, label: str = "") -> bool:
+        """Run *package* on a fresh virtual display in the mirror frame."""
+
+        package = (package or "").strip()
+        if not is_valid_package(package):
+            self.notice.emit("That is not a valid Android package name.")
+            return False
+        if self._serial is None:
+            self.notice.emit("Connect the phone before opening an app.")
+            return False
+        if self._floating:
+            self._stop_floating()
+        if self._dex:
+            self._dex = False
+            self._settings.setValue("mirror/dex", False)
+            self._settings.sync()
+        self._app_package = package
+        self._app_label = (label or "").strip() or package
+        self._update_dex_ui()
+        if self._last_snapshot is not None:
+            self.start(self._last_snapshot, force=True)
+        self.notice.emit(
+            f"Opening {self._app_label} on its own display. "
+            "Use Stop app to return to the phone screen."
+        )
+        return True
+
+    def stop_app_stream(self) -> None:
+        """Close the app's virtual display and show the phone again."""
+
+        if self._app_package is None:
+            return
+        self._app_package = None
+        self._app_label = ""
+        self._update_dex_ui()
+        if self._last_snapshot is not None and self._serial is not None:
+            self.start(self._last_snapshot, force=True)
+        self.notice.emit("App stream stopped; the phone screen is back.")
 
     def toggle_popout(self) -> bool:
         """Open DeX in a floating window, or dock it again."""
@@ -627,11 +725,22 @@ class MirrorPanel(QWidget):
         self._last_state = "starting"
         self._update_dex_ui()
         self._show_overlay()
-        target = "DeX desktop" if self._shows_desktop else name
+        if self._app_package is not None:
+            target = f"{self._app_label} on a virtual display"
+            title = "Restarting the app…" if force else "Starting the app…"
+            icon = "apps"
+        elif self._shows_desktop:
+            target = "the DeX desktop"
+            title = "Restarting the mirror…" if force else "Starting the mirror…"
+            icon = "monitor"
+        else:
+            target = name
+            title = "Restarting the mirror…" if force else "Starting the mirror…"
+            icon = "phone"
         self.stage.placeholder.set_state(
-            "Restarting the mirror…" if force else "Starting the mirror…",
+            title,
             f"Preparing a live view of {target}.",
-            icon="monitor" if self._shows_desktop else "phone",
+            icon=icon,
             tone=MUTED,
         )
         self.live_label.setText("Starting")
@@ -684,6 +793,7 @@ class MirrorPanel(QWidget):
             max(frame.height() - 14, min_height),
             audio=in_app_mirror_audio(self._audio, self._floating),
             dex=self._shows_desktop,
+            app=self._app_package,
         )
 
     def restart(self) -> None:
@@ -707,6 +817,8 @@ class MirrorPanel(QWidget):
         self._floating = False
         self._serial = None
         self._device_name = ""
+        self._app_package = None
+        self._app_label = ""
         self._embedded = False
         self._last_state = "idle"
         self._rotation_hold.invalidate()
@@ -725,6 +837,8 @@ class MirrorPanel(QWidget):
         self._serial = None
         self._embedded = False
         self._floating = False
+        self._app_package = None
+        self._app_label = ""
         self._update_dex_ui()
 
     def focus_screen(self) -> None:
@@ -781,13 +895,13 @@ class MirrorPanel(QWidget):
         self._set_rotate_enabled(False)
         self._show_overlay()
         if state == "failed":
-            title = "Mirror unavailable"
+            title = "App unavailable" if self._app_package is not None else "Mirror unavailable"
             tone = DANGER
-            icon = "phone"
+            icon = "apps" if self._app_package is not None else "phone"
         else:
-            title = "Mirror stopped"
+            title = "App stopped" if self._app_package is not None else "Mirror stopped"
             tone = MUTED
-            icon = "phone"
+            icon = "apps" if self._app_package is not None else "phone"
         self.stage.placeholder.set_state(title, detail, icon=icon, tone=tone, retry=True)
         self.live_label.setText("Offline")
         self.live_label.setStyleSheet(f"color: {DANGER}; font-size: 11px; font-weight: 600;")

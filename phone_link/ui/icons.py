@@ -192,6 +192,14 @@ def glyph_pixmap(name: str, color: str, size: int = 20) -> QPixmap:
         p.drawRoundedRect(QRectF(3.2, 4.8, 17.6, 11.8), 1.8, 1.8)
         p.drawLine(QPointF(12.0, 16.6), QPointF(12.0, 20.0))
         p.drawLine(QPointF(8.4, 20.0), QPointF(15.6, 20.0))
+    elif name == "apps":
+        for row in range(3):
+            for column in range(3):
+                p.drawRoundedRect(
+                    QRectF(4.6 + column * 5.7, 4.6 + row * 5.7, 3.0, 3.0),
+                    0.9,
+                    0.9,
+                )
     elif name == "wifi":
         path = QPainterPath()
         path.arcMoveTo(QRectF(4.0, 6.0, 16.0, 11.0), 55)
