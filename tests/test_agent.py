@@ -400,6 +400,19 @@ class StoreTests(unittest.TestCase):
             [provider.system_prompt for provider in store.providers], before
         )
 
+    def test_phone_context_setting_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "agent.json"
+            store = AgentStore(
+                providers=[Provider(id="zara-fast", label="Zara Fast")],
+                share_phone_state=True,
+            )
+            save_store(store, path)
+            self.assertTrue(load_store(path).share_phone_state)
+            store.share_phone_state = False
+            save_store(store, path)
+            self.assertFalse(load_store(path).share_phone_state)
+
     def test_broken_config_falls_back_to_presets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"

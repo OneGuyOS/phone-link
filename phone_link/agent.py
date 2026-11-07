@@ -135,6 +135,9 @@ def default_config_path() -> Path:
 class AgentStore:
     providers: list[Provider] = field(default_factory=list)
     active_id: str = ""
+    # Off by default: when on, the built-in providers receive a small
+    # read-only snapshot of the phone with each request.
+    share_phone_state: bool = False
 
     def active(self) -> Provider:
         for provider in self.providers:
@@ -234,6 +237,7 @@ def load_store(path: Path | None = None) -> AgentStore:
     active = str(raw.get("active_id") or "")
     if active and store.by_id(active):
         store.active_id = active
+    store.share_phone_state = bool(raw.get("share_phone_state"))
     return store
 
 
@@ -245,6 +249,7 @@ def save_store(store: AgentStore, path: Path | None = None) -> Path:
     payload = {
         "version": 1,
         "active_id": store.active_id,
+        "share_phone_state": store.share_phone_state,
         "providers": [_provider_to_dict(provider) for provider in store.providers],
     }
     temporary = config.with_name(config.name + ".tmp")

@@ -51,6 +51,9 @@ class AgentPanelTests(unittest.TestCase):
         self.chat_saver = mock.patch.object(agent_panel_module, "save_messages")
         self.saved = self.chat_saver.start()
         self.addCleanup(self.chat_saver.stop)
+        self.store_saver = mock.patch.object(agent_panel_module, "save_store")
+        self.saved_store = self.store_saver.start()
+        self.addCleanup(self.store_saver.stop)
         self.panel = AgentPanel(None)
         self.panel.show()
         self.addCleanup(self.panel.close)
@@ -120,6 +123,66 @@ class AgentPanelTests(unittest.TestCase):
         self.saved.assert_called_with(
             [ChatMessage("user", "hi"), ChatMessage("assistant", "hello there")]
         )
+
+    def _builtin_provider(self, *, builtin: bool = True) -> Provider:
+        provider = Provider(
+            id="fake",
+            label="Fake local",
+            kind="openai",
+            base_url="http://127.0.0.1:9/v1",
+            model="fake",
+            system_prompt="Be brief.",
+            builtin=builtin,
+        )
+        self.store.providers = [provider]
+        self.store.active_id = "fake"
+        self.panel._provider = provider
+        return provider
+
+    def test_phone_context_joins_the_system_prompt(self) -> None:
+        provider = self._builtin_provider()
+        self.panel.context_check.setChecked(True)
+        self.panel.set_phone_context_source(
+            lambda: "Phone state: battery 50%."
+        )
+        self.panel.input.setPlainText("what's my battery?")
+        with mock.patch.object(agent_panel_module, "HttpChat") as http:
+            self.panel.send()
+        sent = http.return_value.start.call_args.args[0]
+        self.assertEqual(
+            sent.system_prompt, "Be brief.\n\nPhone state: battery 50%."
+        )
+        self.assertEqual(provider.system_prompt, "Be brief.")
+
+    def test_phone_context_is_off_until_enabled(self) -> None:
+        self._builtin_provider()
+        source = mock.Mock(return_value="Phone state: battery 50%.")
+        self.panel.set_phone_context_source(source)
+        self.panel.input.setPlainText("hello")
+        with mock.patch.object(agent_panel_module, "HttpChat") as http:
+            self.panel.send()
+        sent = http.return_value.start.call_args.args[0]
+        self.assertEqual(sent.system_prompt, "Be brief.")
+        source.assert_not_called()
+
+    def test_custom_provider_never_receives_phone_context(self) -> None:
+        self._builtin_provider(builtin=False)
+        self.panel.context_check.setChecked(True)
+        source = mock.Mock(return_value="Phone state: battery 50%.")
+        self.panel.set_phone_context_source(source)
+        self.panel.input.setPlainText("hello")
+        with mock.patch.object(agent_panel_module, "HttpChat") as http:
+            self.panel.send()
+        sent = http.return_value.start.call_args.args[0]
+        self.assertEqual(sent.system_prompt, "Be brief.")
+        source.assert_not_called()
+
+    def test_phone_context_toggle_is_saved(self) -> None:
+        self.panel.context_check.setChecked(True)
+        self.assertTrue(self.store.share_phone_state)
+        self.saved_store.assert_called()
+        self.panel.context_check.setChecked(False)
+        self.assertFalse(self.store.share_phone_state)
 
     def test_zara_fast_starts_the_managed_server_before_sending(self) -> None:
         provider = Provider(

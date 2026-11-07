@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -154,6 +157,7 @@ class AgentPanel(QWidget):
         self._bubble: MessageBubble | None = None
         self._pending_local_send = False
         self._pending_phone_send = False
+        self._phone_context_source: Callable[[], str] | None = None
         self.local_server = LocalServer(self)
         self.local_server.ready.connect(self._local_ready)
         self.local_server.failed.connect(self._local_failed)
@@ -231,6 +235,16 @@ class AgentPanel(QWidget):
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.setSpacing(7)
+        self.context_check = QCheckBox("Phone context", self)
+        self.context_check.setObjectName("AgentContext")
+        self.context_check.setToolTip(
+            "Include the phone's battery, now playing, active notifications "
+            "and unread texts with each request. Only the built-in local "
+            "providers see this snapshot; it is never saved to the chat file."
+        )
+        self.context_check.setChecked(self._store.share_phone_state)
+        self.context_check.toggled.connect(self._share_phone_state_changed)
+        footer.addWidget(self.context_check)
         self.hint = QLabel("", self)
         self.hint.setObjectName("AgentHint")
         footer.addWidget(self.hint, 1)
@@ -251,6 +265,41 @@ class AgentPanel(QWidget):
         self._restore_chat()
 
     # -- providers ---------------------------------------------------------
+
+    def set_phone_context_source(
+        self, source: Callable[[], str] | None
+    ) -> None:
+        """Supply the callable that describes the phone for the prompt.
+
+        MainWindow owns the ADB, KDE Connect and SMS state, so it builds the
+        snapshot; the panel only asks for it when the user has enabled
+        **Phone context** and a built-in provider is selected.
+        """
+
+        self._phone_context_source = source
+
+    def _share_phone_state_changed(self, checked: bool) -> None:
+        self._store.share_phone_state = checked
+        try:
+            save_store(self._store)
+        except OSError as exc:
+            self.hint.setText(f"Could not save the phone-context setting: {exc}")
+
+    def _with_phone_context(self, provider: Provider) -> Provider:
+        if (
+            not provider.builtin
+            or not self._store.share_phone_state
+            or self._phone_context_source is None
+        ):
+            return provider
+        try:
+            context = self._phone_context_source()
+        except Exception:
+            return provider
+        if not context.strip():
+            return provider
+        prompt = provider.system_prompt.rstrip() + "\n\n" + context.strip()
+        return replace(provider, system_prompt=prompt)
 
     def _initial_provider(self) -> Provider:
         provider = self._store.active() if self._store.active_id else None
@@ -327,6 +376,9 @@ class AgentPanel(QWidget):
             self._store = load_store()
             active = self._store.by_id(dialog.active_id()) or self._store.providers[0]
             self._provider = active
+            self.context_check.blockSignals(True)
+            self.context_check.setChecked(self._store.share_phone_state)
+            self.context_check.blockSignals(False)
             self._reload_providers()
             self._update_status()
 
@@ -483,6 +535,7 @@ class AgentPanel(QWidget):
                 return
 
         self.input.clear()
+        provider = self._with_phone_context(provider)
         self._messages.append(ChatMessage("user", text))
         self._add_bubble("user", text)
         self._save_chat()

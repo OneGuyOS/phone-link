@@ -63,8 +63,10 @@ Windows Phone Link. One window contains:
   llama.cpp model running on this computer, which Phone Link starts itself, or
   from a llama.cpp server on the phone through Termux and `adb forward`. The
   phone server can also be started from the app over ADB. Both use the same
-  model and prompt when it is installed, and the assistant can save files into
-  a folder on this computer. See [Agent chat](#agent-chat).
+  model and prompt when it is installed, the assistant can save files into
+  a folder on this computer, and an optional **Phone context** checkbox lets
+  it answer questions about battery, playback, notifications and unread texts.
+  See [Agent chat](#agent-chat).
 - **Top bar:** phone name, **USB or Wi-Fi** transport, battery level and charging
   state.
 
@@ -360,6 +362,28 @@ visible conversation and the saved file. The transcript is local to this
 computer: it is never uploaded, and no provider other than the one you select
 receives it.
 
+### Phone context
+
+The **Phone context** checkbox next to the composer lets the assistant answer
+questions about the phone. It is off by default; when on, each request to a
+built-in provider starts with a small read-only snapshot the app assembles at
+that moment:
+
+- device name, USB or Wi-Fi, battery level and charging state;
+- the current track and whether it is playing;
+- up to 8 active notifications, newest first (app, heading and body);
+- up to 5 unread text conversations, newest first (number, unread count and
+  the latest message).
+
+Active-notification and unread-conversation lists report how many were left
+out, and long text is shortened. The snapshot is a few kilobytes at most.
+
+It is sent only with **Zara Fast** and **Phone server** requests, so it stays on
+this computer or on the ADB link. A custom endpoint never receives it. The
+snapshot is built for the request and is **not** added to `chat.json`: only
+your questions and the assistant's replies are saved. The setting itself is
+stored in `agent.json` and remembered across restarts.
+
 ### Backends
 
 | Backend | What it is | Reachable at |
@@ -653,7 +677,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 165 unit tests covering ADB parsing and selection, name/battery parsing,
+- 177 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -683,8 +707,9 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   panel's wait-for-phone state, the saved transcript (owner-only atomic file,
   corrupt and invalid records, the stored and context limits), one prompt
   shared by the built-in providers, the panel restoring and saving turns, and
-  the phone provider receiving the conversation the laptop had, plus headless
-  panel and composer tests).
+  the phone provider receiving the conversation the laptop had, the phone
+  snapshot (device, media, capped notifications and unread texts, truncation,
+  and the built-in-only rule), plus headless panel and composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
   counts, and loaded thread pages 50 messages at a time using
@@ -729,6 +754,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   model answered with it. The transcript file was written with mode `0600` and
   held all four turns, and a second panel started from the same data directory
   restored all four as bubbles.
+- Phone context end to end against the real phone and KDE Connect: the app's
+  own ADB, KDE Connect and SMS clients produced a 2,155-character snapshot
+  (79% battery, 27 active notifications and 26 unread text conversations, with
+  the documented caps), **Zara Fast** answered "79%" to a battery question,
+  and `chat.json` held only the question and reply — no phone content.
 
 ### What was not tested
 
@@ -779,6 +809,9 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   transcript that fits the context budget is resent each turn; a custom CLI
   provider starts a fresh process for every message. There are no file
   attachments, and the assistant does not automatically see the phone's state.
+  **Phone context** is a point-in-time summary capped at 8 notifications and 5
+  unread conversations; its SMS part needs KDE Connect's conversations plugin
+  and the notifications are only those KDE Connect exposes.
   Provider settings and keys are stored in a `0600` file but not encrypted;
   anyone who can read your home directory can read them. The local model is
   CPU-only and startup waits for the model to load; the app stops a server it
@@ -1051,7 +1084,9 @@ keeps them in memory only. There is no telemetry and no background network
 service. The agent chat is the only part of Phone Link that makes outbound
 network requests: the built-in providers are local (or reachable through the
 ADB link), and a custom endpoint contacts only the address you configure. The
-agent transcript is written only to its local owner-only `chat.json`.
+agent transcript is written only to its local owner-only `chat.json`. With
+**Phone context** enabled, the snapshot described above is sent only to those
+built-in providers and is not written to disk.
 
 
 ## Project layout

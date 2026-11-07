@@ -28,7 +28,8 @@ from ..adb import AdbMonitor
 from ..clipboard_sync import ClipboardSyncGate
 from ..dependencies import DependencyReport
 from ..kdeconnect import DAEMON_PATH, KdeConnectClient
-from ..models import KdeSnapshot, PhoneSnapshot
+from ..models import KdeSnapshot, MediaState, PhoneSnapshot
+from ..phone_context import build_phone_context
 from ..sms import SmsClient
 from .agent_panel import AgentPanel
 from .dialogs import ShortcutsDialog
@@ -103,6 +104,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.mirror, 1)
 
         self.media = MediaBar(left_column)
+        self._media_state = MediaState()
         self.media.actionRequested.connect(self._media_action)
         self.media.seekRequested.connect(self._media_seek)
         left_layout.addWidget(self.media)
@@ -122,6 +124,7 @@ class MainWindow(QMainWindow):
 
         self.agent_panel = AgentPanel(report.adb_path, root_widget)
         self.agent_panel.setMinimumWidth(360)
+        self.agent_panel.set_phone_context_source(self._phone_context_text)
 
         right_column = QWidget(root_widget)
         right_layout = QVBoxLayout(right_column)
@@ -173,7 +176,7 @@ class MainWindow(QMainWindow):
 
         self.kde = KdeConnectClient(self)
         self.kde.snapshotChanged.connect(self._on_kde_snapshot)
-        self.kde.mediaChanged.connect(self.media.set_media)
+        self.kde.mediaChanged.connect(self._on_media_changed)
         self.kde.phoneStorageReady.connect(self._on_phone_storage_ready)
         self.kde.phoneVolumeChanged.connect(self._apply_phone_volume)
         self.kde.phoneMutedChanged.connect(self._apply_phone_muted)
@@ -344,6 +347,18 @@ class MainWindow(QMainWindow):
 
         self._update_header()
         self.notifications.set_snapshot(self._kde_snapshot)
+
+    def _on_media_changed(self, media: MediaState) -> None:
+        self._media_state = media
+        self.media.set_media(media)
+
+    def _phone_context_text(self) -> str:
+        return build_phone_context(
+            phone=self._adb_snapshot,
+            kde=self._kde_snapshot,
+            media=self._media_state,
+            conversations=self.sms.conversations(),
+        )
 
     def _on_kde_snapshot(self, snapshot: KdeSnapshot) -> None:
         self._kde_snapshot = snapshot
