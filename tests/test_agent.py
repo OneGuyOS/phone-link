@@ -305,6 +305,29 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.active_id, "")
             self.assertEqual(store.active().id, "zara-fast")
 
+    def test_phone_model_defaults_to_the_documented_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "agent.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "providers": [
+                            {
+                                "id": "phone",
+                                "label": "Phone server",
+                                "builtin": True,
+                                "base_url": "http://127.0.0.1:8080/v1",
+                                "model": "",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = load_store(path)
+            self.assertEqual(store.by_id("phone").model, "phone")
+
     def test_broken_config_falls_back_to_presets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"

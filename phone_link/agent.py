@@ -77,6 +77,7 @@ PRESETS: tuple[Provider, ...] = (
         id="phone",
         label="Phone server (ADB forward)",
         base_url="http://127.0.0.1:8080/v1",
+        model="phone",
         local=True,
         builtin=True,
     ),
@@ -190,6 +191,12 @@ def load_store(path: Path | None = None) -> AgentStore:
             provider = _provider_from_dict(item)
             if provider is None:
                 continue
+            if provider.id == "phone" and not provider.model.strip():
+                # Older settings stored no model for the phone server.  The
+                # documented Termux alias is "phone"; llama.cpp ignores the
+                # name in single-model mode, so this also works for a server
+                # started without an alias.
+                provider.model = PRESET_BY_ID["phone"].model
             if provider.id in PRESET_BY_ID:
                 merged[provider.id] = provider
             elif bool(item.get("builtin")):

@@ -379,7 +379,7 @@ computer over the existing ADB connection:
 ```bash
 # in Termux on the phone
 pkg install llama-cpp
-llama-server -m model.gguf --host 127.0.0.1 --port 8080
+llama-server -m model.gguf --host 127.0.0.1 --port 8080 --alias phone
 
 # on the computer, with the phone connected over USB or Wi-Fi ADB
 adb forward tcp:8080 tcp:8080
@@ -387,9 +387,17 @@ adb forward tcp:8080 tcp:8080
 
 `adb forward` maps the computer's `127.0.0.1:8080` to the phone's server, so
 the **Phone server** provider works without exposing Termux to the network. The
-settings dialog has a **Set up ADB forward and test** button that runs the
-forward command and probes the endpoint. Phones are memory-constrained; small
-quantized models are the practical choice.
+provider's default model name is `phone`, matching the `--alias` above;
+llama.cpp ignores the name in single-model mode, so an unaliased server also
+works. The settings dialog has a **Set up ADB forward and test** button that
+runs the forward command and probes the endpoint. Phones are memory-constrained;
+small quantized models are the practical choice.
+
+For a reasoning model, add
+`--chat-template-kwargs '{"enable_thinking":false}'` so replies are not spent
+on hidden chain-of-thought tokens. Keep Termux running (its wake lock is enough
+to keep the server alive in the background); the server stops when Termux is
+force-stopped.
 
 ### Privacy
 
@@ -573,7 +581,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 129 unit tests covering ADB parsing and selection, name/battery parsing,
+- 130 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -612,9 +620,15 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   `[DONE]` sentinel. With the real `agent.json`, provider pruning left exactly
   `zara-fast` and `phone`, the app fell back from a removed active provider to
   Zara Fast, and it detected the installed `llama-server`, the OLMoE `.gguf`
-  and the already-running server. The phone server path was verified only up to
-  running the ADB forward command and probing the endpoint, not with a model
-  actually loaded in Termux.
+  and the already-running server.
+- The phone server end to end on the real Galaxy S25 FE: Termux's
+  `llama-cpp` package served a 4B Q4 model with `--alias phone` on port 8080,
+  `adb forward tcp:8080 tcp:8080` exposed it to the computer, `/v1/models`
+  answered, and a message sent through the real AgentPanel streamed back
+  through the SSE parser. The server stayed reachable after Termux was sent to
+  the background. Reasoning was disabled with
+  `--chat-template-kwargs '{"enable_thinking":false}'`; without it the same
+  model spent its reply on hidden reasoning tokens.
 
 ### What was not tested
 
