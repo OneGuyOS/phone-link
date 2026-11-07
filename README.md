@@ -697,15 +697,16 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   saved it exactly as it does for the local provider. With the server stopped
   and the phone locked, the ADB starter read the real keyguard state and
   reported that the phone must be unlocked within a second, without typing.
+  After unlocking the phone, a send with the Phone provider started Termux
+  over ADB — typing the script and pressing Enter — had the endpoint ready in
+  about 10 seconds, and streamed the reply in about 24 seconds total. The
+  `llama-server` process stayed up afterward.
 
 ### What was not tested
 
 - Custom cloud endpoints were not called during development. The phone
   provider was tested with a 4B model; larger or reasoning-heavy models on the
-  phone were not tried. The successful phone-start path (typing the script
-  into an unlocked Termux session) was exercised with a fake ADB runner; the
-  real phone was locked during the live check, so that sequence has not yet
-  been observed on the hardware.
+  phone were not tried.
 - Manual touch, mouse and keyboard interaction inside the embedded real scrcpy
   window. scrcpy's shortcut forwarding itself was verified: an XTest MOD+h sent
   to the embedded real scrcpy window moved the phone to its launcher, and a
