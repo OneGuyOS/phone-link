@@ -774,9 +774,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 
 - KDE Connect must be installed and running; Phone Link does not reimplement the
   protocol or replace the Android app.
-- Agent conversations live in memory only and start empty after a restart.
-  There are no file attachments, and a custom CLI provider starts a fresh
-  process for every message, so the whole transcript is resent each turn.
+- Agent chat keeps one transcript shared by the built-in providers in
+  `chat.json` (latest 200 messages, mode `0600`, not encrypted). The whole
+  transcript that fits the context budget is resent each turn; a custom CLI
+  provider starts a fresh process for every message. There are no file
+  attachments, and the assistant does not automatically see the phone's state.
   Provider settings and keys are stored in a `0600` file but not encrypted;
   anyone who can read your home directory can read them. The local model is
   CPU-only and startup waits for the model to load; the app stops a server it
@@ -1048,7 +1050,8 @@ tab reads conversations from the phone over the local D-Bus connection and
 keeps them in memory only. There is no telemetry and no background network
 service. The agent chat is the only part of Phone Link that makes outbound
 network requests: the built-in providers are local (or reachable through the
-ADB link), and a custom endpoint contacts only the address you configure.
+ADB link), and a custom endpoint contacts only the address you configure. The
+agent transcript is written only to its local owner-only `chat.json`.
 
 
 ## Project layout
