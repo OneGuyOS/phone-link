@@ -6,7 +6,10 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QComboBox,
     QDialog,
+    QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..dependencies import DependencyReport, check_dependencies, installation_text
+from ..scrcpy import MirrorQuality
 from .icons import app_icon_pixmap, glyph_pixmap
 from .theme import (
     BORDER,
@@ -153,6 +157,112 @@ class ShortcutsDialog(QDialog):
         close.clicked.connect(self.accept)
         buttons.addWidget(close)
         root.addLayout(buttons)
+
+
+class MirrorQualityDialog(QDialog):
+    """Video size, bit rate and frame rate for the phone mirror."""
+
+    BIT_RATES = (
+        ("Default (8 Mbps)", 0),
+        ("4 Mbps — lighter", 4_000_000),
+        ("16 Mbps — sharper", 16_000_000),
+        ("24 Mbps — sharpest", 24_000_000),
+    )
+    SIZES = (
+        ("Full resolution", 0),
+        ("1080 px long side", 1080),
+        ("720 px long side", 720),
+        ("540 px long side", 540),
+    )
+    FRAME_RATES = (
+        ("Display rate", 0),
+        ("60 fps", 60),
+        ("30 fps", 30),
+        ("24 fps", 24),
+    )
+
+    def __init__(self, quality: MirrorQuality, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Phone Link — mirror quality")
+        if parent is not None:
+            self.setWindowIcon(parent.windowIcon())
+        self.setModal(True)
+        self.setMinimumWidth(470)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 20)
+        root.setSpacing(14)
+
+        title = QLabel("Mirror quality", self)
+        title.setStyleSheet(f"color: {TEXT}; font-size: 20px; font-weight: 600;")
+        root.addWidget(title)
+        intro = QLabel(
+            "Video settings for the phone mirror and DeX. Saving restarts the "
+            "mirror; a recording in progress is saved first.",
+            self,
+        )
+        intro.setStyleSheet(f"color: {MUTED}; font-size: 12px;")
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 4, 0, 0)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(11)
+        self.bit_rate = QComboBox(self)
+        self._fill(self.bit_rate, self.BIT_RATES, quality.bit_rate)
+        self.bit_rate.setToolTip("Higher bit rates keep fast motion clearer and use more network.")
+        form.addRow(QLabel("Video bit rate", self), self.bit_rate)
+        self.size_limit = QComboBox(self)
+        self._fill(self.size_limit, self.SIZES, quality.max_size)
+        self.size_limit.setToolTip("Limits the longer side of the encoded picture.")
+        form.addRow(QLabel("Size limit", self), self.size_limit)
+        self.frame_rate = QComboBox(self)
+        self._fill(self.frame_rate, self.FRAME_RATES, quality.max_fps)
+        self.frame_rate.setToolTip("Caps how many frames per second the phone captures.")
+        form.addRow(QLabel("Frame rate", self), self.frame_rate)
+        root.addLayout(form)
+
+        self.screen_off = QCheckBox("Turn the phone screen off while mirroring", self)
+        self.screen_off.setChecked(quality.turn_screen_off)
+        self.screen_off.setToolTip("Saves battery. The mirror keeps updating.")
+        root.addWidget(self.screen_off)
+        hint = QLabel(
+            "The mirror keeps updating with the phone screen dark. Press the "
+            "phone's power button to light it again.",
+            self,
+        )
+        hint.setStyleSheet(f"color: {DIM}; font-size: 11px;")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        cancel = QPushButton("Cancel", self)
+        cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        self.apply_button = QPushButton("Apply", self)
+        self.apply_button.setObjectName("PrimaryButton")
+        self.apply_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.apply_button.clicked.connect(self.accept)
+        buttons.addWidget(self.apply_button)
+        root.addLayout(buttons)
+
+    @staticmethod
+    def _fill(combo: QComboBox, choices, current: int) -> None:
+        for label, value in choices:
+            combo.addItem(label, value)
+        index = combo.findData(int(current))
+        combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def quality(self) -> MirrorQuality:
+        return MirrorQuality(
+            bit_rate=int(self.bit_rate.currentData()),
+            max_size=int(self.size_limit.currentData()),
+            max_fps=int(self.frame_rate.currentData()),
+            turn_screen_off=self.screen_off.isChecked(),
+        )
 
 
 class DependencyDialog(QDialog):

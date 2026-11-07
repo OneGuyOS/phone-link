@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QElapsedTimer, QEvent, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -20,7 +21,8 @@ from PySide6.QtWidgets import (
 
 from ..capture import ScreenshotCapture, timestamped_name, unique_path
 from ..models import PhoneSnapshot
-from ..scrcpy import ScrcpySession
+from ..scrcpy import MirrorQuality, ScrcpySession
+from .dialogs import MirrorQualityDialog
 from .icons import empty_state_pixmap, glyph_icon, glyph_pixmap
 from .theme import DANGER, DIM, MUTED, SUCCESS, TEXT_SOFT
 
@@ -244,6 +246,14 @@ class MirrorPanel(QWidget):
         self._settings = QSettings()
         self._audio = bool(self._settings.value("mirror/audio", False, type=bool))
         self._dex = bool(self._settings.value("mirror/dex", False, type=bool))
+        self._quality = MirrorQuality(
+            bit_rate=int(self._settings.value("mirror/bit_rate", 0, type=int)),
+            max_size=int(self._settings.value("mirror/max_size", 0, type=int)),
+            max_fps=int(self._settings.value("mirror/max_fps", 0, type=int)),
+            turn_screen_off=bool(
+                self._settings.value("mirror/screen_off", False, type=bool)
+            ),
+        )
         self._floating = False
         # Which view the floating window carries: "dex", "phone" or "".
         self._float_kind = ""
@@ -355,6 +365,17 @@ class MirrorPanel(QWidget):
         self.record.clicked.connect(self._on_record_clicked)
         self.record.setEnabled(False)
         strip.addWidget(self.record)
+
+        self.quality_button = QToolButton(self)
+        self.quality_button.setObjectName("QualityButton")
+        self.quality_button.setIcon(glyph_icon("sliders", MUTED, 16))
+        self.quality_button.setIconSize(QSize(16, 16))
+        self.quality_button.setToolTip(
+            "Mirror quality and screen-off (restarts the mirror)"
+        )
+        self.quality_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.quality_button.clicked.connect(self._on_quality_clicked)
+        strip.addWidget(self.quality_button)
         strip.addStretch(1)
         self.input_hint = QLabel("", self)
         self.input_hint.setObjectName("Dim")
@@ -511,6 +532,49 @@ class MirrorPanel(QWidget):
             self.start(self._last_snapshot, force=True)
 
     @property
+    def quality(self) -> MirrorQuality:
+        return self._quality
+
+    def _on_quality_clicked(self, _checked: bool = False) -> None:
+        dialog = MirrorQualityDialog(self._quality, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.set_quality(dialog.quality())
+        dialog.deleteLater()
+
+    def set_quality(self, quality: MirrorQuality) -> None:
+        """Save new video settings and restart a live mirror to apply them."""
+
+        if quality == self._quality:
+            return
+        self._quality = quality
+        self._settings.setValue("mirror/bit_rate", quality.bit_rate)
+        self._settings.setValue("mirror/max_size", quality.max_size)
+        self._settings.setValue("mirror/max_fps", quality.max_fps)
+        self._settings.setValue("mirror/screen_off", quality.turn_screen_off)
+        self._settings.sync()
+        live = (
+            self._floating
+            or self._embedded
+            or self._last_state in ("starting", "failed")
+        )
+        if self._serial is None or self._last_snapshot is None or not live:
+            self.notice.emit(
+                "Mirror quality saved; it applies the next time the mirror starts."
+            )
+            return
+        # The restart would cut a recording short, so save it first.
+        self._finish_recording()
+        if self._floating:
+            self._restart_visible_session()
+            if self._float_kind == "dex":
+                # The frame keeps its own phone mirror while DeX floats, so
+                # both sessions need the new settings.
+                self.start(self._last_snapshot, force=True)
+        else:
+            self.start(self._last_snapshot, force=True)
+        self.notice.emit("Mirror quality updated; restarting the mirror.")
+
+    @property
     def is_recording(self) -> bool:
         return bool(self._recording_path)
 
@@ -646,6 +710,7 @@ class MirrorPanel(QWidget):
                 dex=dex,
                 floating=True,
                 record_path=record,
+                quality=self._quality,
             )
             return
         if self._last_snapshot is not None:
@@ -793,6 +858,7 @@ class MirrorPanel(QWidget):
                 audio=self._audio,
                 dex=True,
                 floating=True,
+                quality=self._quality,
             )
             if self._last_snapshot is not None:
                 # Bring the normal phone mirror back into the app while DeX
@@ -820,6 +886,7 @@ class MirrorPanel(QWidget):
             audio=self._audio,
             dex=False,
             floating=True,
+            quality=self._quality,
         )
         self.notice.emit(
             "The phone screen opened in its own window. Use Dock to bring it back."
@@ -838,6 +905,7 @@ class MirrorPanel(QWidget):
             audio=self._audio,
             dex=False,
             floating=True,
+            quality=self._quality,
         )
 
     def _show_floating_placeholder(self) -> None:
@@ -1019,6 +1087,7 @@ class MirrorPanel(QWidget):
             audio=in_app_mirror_audio(self._audio, self._floating),
             dex=self._shows_desktop,
             record_path=self._recording_path or None,
+            quality=self._quality,
         )
 
     def restart(self) -> None:

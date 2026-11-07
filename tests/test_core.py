@@ -42,7 +42,7 @@ from phone_link.notification_store import (
     load_history,
     save_history,
 )
-from phone_link.scrcpy import DEX_DISPLAY, _friendly_failure, build_scrcpy_args
+from phone_link.scrcpy import DEX_DISPLAY, MirrorQuality, _friendly_failure, build_scrcpy_args
 from phone_link.ui.mirror import in_app_mirror_audio
 from phone_link.ui.notifications import notification_matches
 from phone_link.wifi import make_qr_pairing, parse_mdns_services
@@ -717,6 +717,32 @@ class ScrcpyCommandTests(unittest.TestCase):
         args = self.build(serial="192.168.1.50:5555", audio=True)
         self.assertNotIn("--no-audio", args)
         self.assertNotIn("--audio-buffer", args)
+
+    def test_default_quality_adds_no_video_flags(self) -> None:
+        args = self.build(quality=MirrorQuality())
+        for flag in ("--video-bit-rate=", "--max-size=", "--max-fps="):
+            self.assertFalse(any(arg.startswith(flag) for arg in args))
+        self.assertNotIn("--turn-screen-off", args)
+
+    def test_quality_flags_are_passed_through(self) -> None:
+        quality = MirrorQuality(
+            bit_rate=16_000_000,
+            max_size=720,
+            max_fps=30,
+            turn_screen_off=True,
+        )
+        args = self.build(quality=quality)
+        self.assertIn("--video-bit-rate=16000000", args)
+        self.assertIn("--max-size=720", args)
+        self.assertIn("--max-fps=30", args)
+        self.assertIn("--turn-screen-off", args)
+
+    def test_single_quality_setting_leaves_the_others_at_defaults(self) -> None:
+        args = self.build(quality=MirrorQuality(max_fps=24))
+        self.assertIn("--max-fps=24", args)
+        self.assertFalse(any(arg.startswith("--max-size") for arg in args))
+        self.assertFalse(any(arg.startswith("--video-bit-rate") for arg in args))
+        self.assertNotIn("--turn-screen-off", args)
 
 
 class DeXAudioTests(unittest.TestCase):

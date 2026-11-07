@@ -242,6 +242,13 @@ def glyph_pixmap(name: str, color: str, size: int = 20) -> QPixmap:
         p.drawPath(path)
         p.drawLine(QPointF(13.8, 3.7), QPointF(13.8, 8.3))
         p.drawLine(QPointF(13.8, 8.3), QPointF(18.3, 8.3))
+    elif name == "sliders":
+        p.drawLine(QPointF(4.0, 7.5), QPointF(20.0, 7.5))
+        p.drawLine(QPointF(4.0, 16.5), QPointF(20.0, 16.5))
+        p.setBrush(QColor(color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(8.5, 7.5), 2.5, 2.5)
+        p.drawEllipse(QPointF(15.5, 16.5), 2.5, 2.5)
     elif name == "check":
         path = QPainterPath()
         path.moveTo(5.0, 12.5)

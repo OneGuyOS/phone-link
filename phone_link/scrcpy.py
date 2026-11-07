@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import dataclass
 
 from PySide6.QtCore import (
     QElapsedTimer,
@@ -19,6 +20,21 @@ from .x11 import X11Display, X11Error
 # A 1080p virtual display at 240 dpi gives Samsung's desktop mode
 # (DeX) the full launcher, taskbar and window decorations.
 DEX_DISPLAY = "1920x1080/240"
+
+
+@dataclass(frozen=True)
+class MirrorQuality:
+    """Video settings applied to every scrcpy session.
+
+    Zero means "leave scrcpy's own default": 8 Mbps, the device's native
+    resolution and its display frame rate.
+    """
+
+    bit_rate: int = 0
+    max_size: int = 0
+    max_fps: int = 0
+    turn_screen_off: bool = False
+
 
 # scrcpy reports the display it created, e.g.
 #   INFO: New display: 1920x1080/240 (id=114)
@@ -49,6 +65,7 @@ class ScrcpySession(QObject):
         self._width = 1
         self._height = 1
         self._audio = False
+        self._quality = MirrorQuality()
         self._dex = False
         self._floating = False
         self._floating_live = False
@@ -124,6 +141,7 @@ class ScrcpySession(QObject):
         dex: bool = False,
         floating: bool = False,
         record_path: str | None = None,
+        quality: MirrorQuality | None = None,
     ) -> None:
         # Remember where the keyboard was so a restart (DeX toggle, recording)
         # does not move it away from the user's current focus.
@@ -131,6 +149,8 @@ class ScrcpySession(QObject):
         self.stop(silent=True)
         if audio is not None:
             self._audio = bool(audio)
+        if quality is not None:
+            self._quality = quality
         self._embedded = False
         self._ever_embedded = False
         self._saw_crash = False
@@ -191,6 +211,7 @@ class ScrcpySession(QObject):
             floating=self._floating,
             audio=self._audio,
             record=self._record_path or None,
+            quality=self._quality,
         )
         self._elapsed.start()
         self._stopping = False
@@ -444,6 +465,7 @@ def build_scrcpy_args(
     floating: bool = False,
     audio: bool = False,
     record: str | None = None,
+    quality: MirrorQuality | None = None,
 ) -> list[str]:
     """Build the scrcpy command line for one mirror or DeX window."""
 
@@ -490,6 +512,16 @@ def build_scrcpy_args(
         # restarts the visible session with this flag to begin, and restarts
         # it again without the flag to stop and finalize the MP4.
         args.append(f"--record={record}")
+    if quality is not None:
+        # Zero values are scrcpy's own defaults, so leave those flags out.
+        if quality.bit_rate:
+            args.append(f"--video-bit-rate={int(quality.bit_rate)}")
+        if quality.max_size:
+            args.append(f"--max-size={int(quality.max_size)}")
+        if quality.max_fps:
+            args.append(f"--max-fps={int(quality.max_fps)}")
+        if quality.turn_screen_off:
+            args.append("--turn-screen-off")
     # Audio keeps scrcpy's 50 ms default buffer: USB and the router's 5 GHz
     # band both carry the stream without loss, so the tighter A/V sync wins.
     return args

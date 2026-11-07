@@ -25,6 +25,10 @@ Windows Phone Link. One window contains:
   an MP4 in `~/Videos/Phone Link`; click it again to stop and save. scrcpy only
   records from the start of a session, so starting or stopping briefly restarts
   the mirror.
+- **Quality:** the sliders button in the mirror strip sets the video bit rate,
+  a size limit and a frame-rate cap, and can keep the phone's screen dark while
+  mirroring to save battery. The values are remembered and apply to the phone
+  mirror and DeX, embedded or popped out. See [Mirror quality](#mirror-quality).
 - **DeX:** the **DeX** button switches the frame to Samsung's desktop mode on a
   1080p virtual display, with the full launcher, taskbar and windows. The last
   mode is remembered.
@@ -391,6 +395,27 @@ mirrored over the wireless transport.
 
 ---
 
+## Mirror quality
+
+The sliders button at the end of the mirror strip opens **Mirror quality**. It
+sets the video bit rate (scrcpy's 8 Mbps default, 4, 16 or 24 Mbps), an
+optional cap on the longer side of the picture (1080, 720 or 540 px), a frame
+rate cap (display rate, 60, 30 or 24 fps), and whether the phone's screen stays
+dark while mirroring. **Turn the phone screen off while mirroring** saves
+battery; the picture keeps updating, and the phone's power button lights the
+screen again.
+
+The values are saved locally and used by every later session — the phone
+mirror, DeX, and either of them popped out. Saving restarts the visible
+session, so a recording in progress is finished first. The defaults leave
+scrcpy's own settings untouched.
+
+scrcpy applies the dark screen when a session starts. If something else turns
+the screen on while mirroring — the power button, or another scrcpy session —
+it stays on until the mirror restarts.
+
+---
+
 ## Messages
 
 The right panel has three tabs: **Notifications**, **Messages** and **Agent**.
@@ -724,6 +749,12 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   manual refresh.
 - Real scrcpy 5.0.1 window embedded inside the Phone Link window, and the
   scrcpy process staying alive after embedding (after the SDL3 settle delay).
+- Mirror quality against the real phone: applying 24 Mbps and 24 fps in the
+  dialog restarted the embedded session, and a floating DeX session, with
+  `--video-bit-rate=24000000 --max-fps=24`; the values survived an app
+  restart. Turning on **screen off** added `--turn-screen-off`, scrcpy logged
+  `Device display turned off`, and stopping the session brought the screen
+  back (`mScreenOnFully=true`).
 - Startup dependency checks and the missing-tool dialog with targeted install
   commands.
 - Full window in the mock environment: header name / transport / battery,
@@ -870,11 +901,14 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 247 unit tests covering ADB parsing and selection, name/battery parsing,
+- 255 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
-  windows, automatic wireless reconnection (same host, changed port, other
-  hosts ignored, cooldown), which mirror owns DeX audio, camera-photo import
+  windows (including the optional quality flags), automatic wireless
+  reconnection (same host, changed port, other hosts ignored, cooldown), which
+  mirror owns DeX audio, the mirror quality dialog (round-tripping saved
+  values, unknown stored values falling back to the defaults), camera-photo
+  import
   (MediaStore row parsing and filtering, the date watermark, safe filenames,
   same-name/size deduplication, numeric suffixes, failed-pull retry, the
   owner-only state file and its cap), notification
