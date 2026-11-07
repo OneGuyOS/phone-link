@@ -711,6 +711,7 @@ class MainWindow(QMainWindow):
         self._adb_timer.stop()
         self.mirror.stop()
         self.adb.stop()
+        self.agent_panel.shutdown()
         self.sms.stop()
         self.kde.stop()
         event.accept()

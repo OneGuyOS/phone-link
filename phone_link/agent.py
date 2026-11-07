@@ -2,16 +2,16 @@
 
 Three kinds of backend share one conversation model:
 
-* ``openai`` - any OpenAI-compatible ``/v1/chat/completions`` endpoint.  This
-  covers the local llama.cpp servers, Ollama, a llama.cpp server running in
-  Termux on the phone (reachable through ``adb forward``), and the free cloud
-  tiers (Gemini, Groq, Cerebras, OpenRouter, Mistral).
+* ``openai`` - any OpenAI-compatible ``/v1/chat/completions`` endpoint.  The
+  built-in providers use it for the local llama.cpp server on this computer
+  and the llama.cpp server running in Termux on the phone (reachable through
+  ``adb forward``).  Custom endpoints can be added in the settings dialog.
 * ``claude`` - the Claude Code CLI in ``--print`` mode, streaming JSON events.
 * ``codex`` - the Codex CLI in ``exec --json`` mode.
 
 Provider definitions and API keys are stored in
 ``$XDG_DATA_HOME/phone-link/agent.json`` with owner-only permissions.  Nothing
-here sends data anywhere unless the active provider is a cloud endpoint.
+here sends data anywhere unless the active provider is a remote endpoint.
 """
 
 from __future__ import annotations
@@ -28,9 +28,6 @@ from pathlib import Path
 from typing import Iterable
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
-
-APP_TITLE = "Phone Link"
-OPENROUTER_REFERER = "https://github.com/OneGuyOS/phone-link"
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are the assistant built into Phone Link, a KDE desktop companion for "
@@ -63,8 +60,10 @@ class ChatMessage:
 
 
 # Presets are the starting points; the settings dialog edits copies of these
-# and stores the result.  Model ids on free tiers change often, so the dialog
-# can fetch /v1/models and every field is editable.
+# and stores the result.  Phone Link ships with two providers: a small local
+# llama.cpp model that the app can start itself, and the llama.cpp server in
+# Termux on the phone.  Custom OpenAI-compatible endpoints can be added from
+# the settings dialog.
 PRESETS: tuple[Provider, ...] = (
     Provider(
         id="zara-fast",
@@ -75,97 +74,15 @@ PRESETS: tuple[Provider, ...] = (
         builtin=True,
     ),
     Provider(
-        id="zara-deep",
-        label="Zara Deep (local)",
-        base_url="http://127.0.0.1:18090/v1",
-        model="zara-deep",
-        local=True,
-        builtin=True,
-    ),
-    Provider(
-        id="zara-bonsai",
-        label="Zara Bonsai (local)",
-        base_url="http://127.0.0.1:18091/v1",
-        model="zara-bonsai",
-        local=True,
-        builtin=True,
-    ),
-    Provider(
-        id="ollama",
-        label="Ollama (local)",
-        base_url="http://127.0.0.1:11434/v1",
-        local=True,
-        builtin=True,
-    ),
-    Provider(
         id="phone",
         label="Phone server (ADB forward)",
         base_url="http://127.0.0.1:8080/v1",
         local=True,
         builtin=True,
     ),
-    Provider(
-        id="gemini",
-        label="Google Gemini - free tier",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-        model="gemini-3.5-flash",
-        free=True,
-        builtin=True,
-    ),
-    Provider(
-        id="groq",
-        label="Groq - free tier",
-        base_url="https://api.groq.com/openai/v1",
-        model="openai/gpt-oss-120b",
-        free=True,
-        builtin=True,
-    ),
-    Provider(
-        id="cerebras",
-        label="Cerebras - free tier",
-        base_url="https://api.cerebras.ai/v1",
-        model="gpt-oss-120b",
-        free=True,
-        builtin=True,
-    ),
-    Provider(
-        id="openrouter",
-        label="OpenRouter - free models",
-        base_url="https://openrouter.ai/api/v1",
-        free=True,
-        builtin=True,
-    ),
-    Provider(
-        id="mistral",
-        label="Mistral - free experiment",
-        base_url="https://api.mistral.ai/v1",
-        model="mistral-small-latest",
-        free=True,
-        builtin=True,
-    ),
-    Provider(
-        id="claude-cli",
-        label="Claude Code (CLI agent)",
-        kind="claude",
-        builtin=True,
-    ),
-    Provider(
-        id="codex-cli",
-        label="Codex (CLI agent)",
-        kind="codex",
-        builtin=True,
-    ),
 )
 
 PRESET_BY_ID = {provider.id: provider for provider in PRESETS}
-
-KEY_ENV = {
-    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    "groq": ("GROQ_API_KEY",),
-    "cerebras": ("CEREBRAS_API_KEY",),
-    "openrouter": ("OPENROUTER_API_KEY",),
-    "mistral": ("MISTRAL_API_KEY",),
-}
 
 _EDITABLE = (
     "label",
@@ -273,8 +190,13 @@ def load_store(path: Path | None = None) -> AgentStore:
             provider = _provider_from_dict(item)
             if provider is None:
                 continue
-            if provider.builtin:
+            if provider.id in PRESET_BY_ID:
                 merged[provider.id] = provider
+            elif bool(item.get("builtin")):
+                # A preset that this version no longer ships (for example a
+                # cloud provider or an old local model) must not come back as
+                # a custom provider.
+                continue
             else:
                 custom.append(provider)
         store.providers = list(merged.values()) + custom
@@ -315,15 +237,9 @@ def save_store(store: AgentStore, path: Path | None = None) -> Path:
 
 
 def provider_key(provider: Provider) -> str:
-    """The configured key, or a matching environment variable."""
+    """The API key stored for a custom provider, if any."""
 
-    if provider.api_key.strip():
-        return provider.api_key.strip()
-    for name in KEY_ENV.get(provider.id, ()):
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return ""
+    return provider.api_key.strip()
 
 
 # --------------------------------------------------------------------------
@@ -400,9 +316,6 @@ def _request_headers(provider: Provider) -> dict[str, str]:
     key = provider_key(provider)
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    if provider.id == "openrouter":
-        headers["HTTP-Referer"] = OPENROUTER_REFERER
-        headers["X-Title"] = APP_TITLE
     return headers
 
 

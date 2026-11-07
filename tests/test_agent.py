@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import stat
 import tempfile
 import unittest
@@ -44,8 +43,8 @@ class UrlTests(unittest.TestCase):
             "http://127.0.0.1:18089/v1/chat/completions",
         )
         self.assertEqual(
-            chat_url("https://api.groq.com/openai/v1/"),
-            "https://api.groq.com/openai/v1/chat/completions",
+            chat_url("https://example.com/openai/v1/"),
+            "https://example.com/openai/v1/chat/completions",
         )
         self.assertEqual(
             chat_url("http://localhost:11434"),
@@ -62,8 +61,8 @@ class UrlTests(unittest.TestCase):
             "http://127.0.0.1:18089/v1/models",
         )
         self.assertEqual(
-            models_url("https://api.mistral.ai/v1/"),
-            "https://api.mistral.ai/v1/models",
+            models_url("https://example.com/v1/"),
+            "https://example.com/v1/models",
         )
 
 
@@ -205,15 +204,11 @@ class ParseTests(unittest.TestCase):
 
 
 class StoreTests(unittest.TestCase):
-    def test_provider_key_prefers_store_then_environment(self) -> None:
-        provider = Provider(id="groq", label="Groq", api_key=" stored ")
+    def test_provider_key_uses_the_stored_key(self) -> None:
+        provider = Provider(id="custom-1", label="Custom", api_key=" stored ")
         self.assertEqual(provider_key(provider), "stored")
         provider.api_key = ""
-        with mock.patch.dict(os.environ, {"GROQ_API_KEY": "env-key"}, clear=False):
-            self.assertEqual(provider_key(provider), "env-key")
-        provider.id = "groq"
-        with mock.patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False):
-            self.assertEqual(provider_key(provider), "")
+        self.assertEqual(provider_key(provider), "")
 
     def test_store_navigation(self) -> None:
         store = AgentStore(
@@ -233,7 +228,10 @@ class StoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"
             store = load_store(path)
-            self.assertGreater(len(store.providers), 3)
+            self.assertEqual(
+                [provider.id for provider in store.providers],
+                ["zara-fast", "phone"],
+            )
             custom = Provider(
                 id="custom-1",
                 label="Mine",
@@ -260,20 +258,63 @@ class StoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"
             store = load_store(path)
-            gemini = store.by_id("gemini")
-            gemini.model = "gemini-test"
+            fast = store.by_id("zara-fast")
+            fast.model = "zara-test"
             save_store(store, path)
             reloaded = load_store(path)
-            self.assertEqual(reloaded.by_id("gemini").model, "gemini-test")
-            self.assertTrue(reloaded.by_id("gemini").builtin)
+            self.assertEqual(reloaded.by_id("zara-fast").model, "zara-test")
+            self.assertTrue(reloaded.by_id("zara-fast").builtin)
+
+    def test_removed_builtins_do_not_come_back(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "agent.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "active_id": "gemini",
+                        "providers": [
+                            {
+                                "id": "gemini",
+                                "label": "Gemini",
+                                "builtin": True,
+                                "api_key": "old",
+                            },
+                            {
+                                "id": "zara-bonsai",
+                                "label": "Bonsai",
+                                "builtin": True,
+                                "model": "zara-bonsai",
+                            },
+                            {
+                                "id": "custom-1",
+                                "label": "Mine",
+                                "builtin": False,
+                                "base_url": "http://127.0.0.1:9000/v1",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = load_store(path)
+            self.assertEqual(
+                [provider.id for provider in store.providers],
+                ["zara-fast", "phone", "custom-1"],
+            )
+            self.assertEqual(store.active_id, "")
+            self.assertEqual(store.active().id, "zara-fast")
 
     def test_broken_config_falls_back_to_presets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"
             path.write_text("{not json", encoding="utf-8")
             store = load_store(path)
-            self.assertGreater(len(store.providers), 3)
-            self.assertTrue(store.by_id("gemini").builtin)
+            self.assertEqual(
+                [provider.id for provider in store.providers],
+                ["zara-fast", "phone"],
+            )
+            self.assertTrue(store.by_id("zara-fast").builtin)
 
 
 class AdbForwardTests(unittest.TestCase):
