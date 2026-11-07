@@ -110,6 +110,52 @@ class AgentPanelTests(unittest.TestCase):
         self.assertFalse(self.panel._pending_local_send)
         self.assertTrue(self.panel.input.isEnabled())
 
+    def _select_phone(self) -> Provider:
+        provider = Provider(
+            id="phone",
+            label="Phone server",
+            kind="openai",
+            base_url="http://127.0.0.1:8080/v1",
+            model="phone",
+            local=True,
+        )
+        self.store.providers = [provider]
+        self.store.active_id = "phone"
+        self.panel._provider = provider
+        return provider
+
+    def test_phone_provider_starts_the_phone_server_before_sending(self) -> None:
+        self._select_phone()
+        self.panel.input.setPlainText("hello")
+        with mock.patch.object(
+            self.panel.phone_starter, "is_ready", return_value=False
+        ):
+            with mock.patch.object(
+                self.panel.phone_starter, "ensure_started"
+            ) as ensure:
+                self.panel.send()
+        ensure.assert_called_once()
+        self.assertTrue(self.panel._pending_phone_send)
+        self.assertEqual(self.panel.input.toPlainText(), "hello")
+        self.assertFalse(self.panel.input.isEnabled())
+        self.assertIn("phone model", self.panel.status.text())
+        self.panel.stop()
+        self.assertFalse(self.panel._pending_phone_send)
+        self.assertTrue(self.panel.input.isEnabled())
+
+    def test_phone_start_failure_shows_an_error(self) -> None:
+        self._select_phone()
+        self.panel.input.setPlainText("hello")
+        with mock.patch.object(
+            self.panel.phone_starter, "is_ready", return_value=False
+        ):
+            with mock.patch.object(self.panel.phone_starter, "ensure_started"):
+                self.panel.send()
+        self.panel._phone_failed("Termux is not installed.")
+        self.assertFalse(self.panel._pending_phone_send)
+        self.assertTrue(self.panel.input.isEnabled())
+        self.assertEqual(self._bubble_roles(), ["error"])
+
 
     def test_reply_file_blocks_are_saved_and_reported(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

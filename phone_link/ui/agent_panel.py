@@ -46,6 +46,7 @@ from ..agent import (
     save_store,
 )
 from ..local_server import LocalServer
+from ..phone_server import PhoneStarter
 from .theme import ACCENT, SUCCESS
 
 
@@ -150,9 +151,13 @@ class AgentPanel(QWidget):
         self._chat: HttpChat | CliChat | None = None
         self._bubble: MessageBubble | None = None
         self._pending_local_send = False
+        self._pending_phone_send = False
         self.local_server = LocalServer(self)
         self.local_server.ready.connect(self._local_ready)
         self.local_server.failed.connect(self._local_failed)
+        self.phone_starter = PhoneStarter(adb_path, self)
+        self.phone_starter.ready.connect(self._phone_ready)
+        self.phone_starter.failed.connect(self._phone_failed)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -367,6 +372,13 @@ class AgentPanel(QWidget):
             )
         )
 
+    def _phone_provider(self, provider: Provider) -> bool:
+        return provider.kind == "openai" and provider.id == "phone" and (
+            provider.base_url.startswith(
+                ("http://127.0.0.1", "http://localhost")
+            )
+        )
+
     def _wait_for_local(self) -> None:
         self._pending_local_send = True
         self.input.setEnabled(False)
@@ -382,7 +394,7 @@ class AgentPanel(QWidget):
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
         self.stop_button.setVisible(False)
-        self.send(_local_ready=True)
+        self.send(_server_ready=True)
 
     def _local_failed(self, message: str) -> None:
         if not self._pending_local_send:
@@ -394,14 +406,44 @@ class AgentPanel(QWidget):
         self._update_status()
         self._add_bubble("error", message)
 
+    def _wait_for_phone(self) -> None:
+        self._pending_phone_send = True
+        self.input.setEnabled(False)
+        self.send_button.setEnabled(False)
+        self.stop_button.setVisible(True)
+        self.status.setText("Starting the phone model…")
+        self.phone_starter.ensure_started()
+
+    def _phone_ready(self) -> None:
+        if not self._pending_phone_send:
+            return
+        self._pending_phone_send = False
+        self.input.setEnabled(True)
+        self.send_button.setEnabled(True)
+        self.stop_button.setVisible(False)
+        self.send(_server_ready=True)
+
+    def _phone_failed(self, message: str) -> None:
+        if not self._pending_phone_send:
+            return
+        self._pending_phone_send = False
+        self.input.setEnabled(True)
+        self.send_button.setEnabled(True)
+        self.stop_button.setVisible(False)
+        self._update_status()
+        self._add_bubble("error", message)
+
     def shutdown(self) -> None:
-        """Stop this app's chat work and the server it may have started."""
+        """Stop this app's chat work and the servers it may have started."""
 
         self.stop()
         self.local_server.stop()
+        self.phone_starter.stop()
 
-    def send(self, _local_ready: bool = False) -> None:
+    def send(self, _server_ready: bool = False) -> None:
         if self._chat is not None or self._pending_local_send:
+            return
+        if self._pending_phone_send:
             return
         text = self.input.toPlainText().strip()
         if not text:
@@ -414,13 +456,16 @@ class AgentPanel(QWidget):
                 "pick a model, and try again.",
             )
             return
-        if (
-            not _local_ready
-            and self._local_provider(provider)
-            and not self.local_server.is_ready()
-        ):
-            self._wait_for_local()
-            return
+        if not _server_ready and provider.kind == "openai":
+            if self._local_provider(provider) and not self.local_server.is_ready():
+                self._wait_for_local()
+                return
+            if (
+                self._phone_provider(provider)
+                and not self.phone_starter.is_ready()
+            ):
+                self._wait_for_phone()
+                return
 
         self.input.clear()
         self._messages.append(ChatMessage("user", text))
@@ -459,6 +504,13 @@ class AgentPanel(QWidget):
         if self._pending_local_send:
             self._pending_local_send = False
             self.local_server.stop()
+            self.input.setEnabled(True)
+            self.send_button.setEnabled(True)
+            self.stop_button.setVisible(False)
+            self._update_status()
+        if self._pending_phone_send:
+            self._pending_phone_send = False
+            self.phone_starter.stop()
             self.input.setEnabled(True)
             self.send_button.setEnabled(True)
             self.stop_button.setVisible(False)

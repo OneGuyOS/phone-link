@@ -61,9 +61,10 @@ Windows Phone Link. One window contains:
   from a composer. See [Messages](#messages).
 - **Agent chat:** another tab in the right panel streams replies from a small
   llama.cpp model running on this computer, which Phone Link starts itself, or
-  from a llama.cpp server on the phone through Termux and `adb forward`. Both
-  use the same model and prompt when it is installed, and the assistant can
-  save files into a folder on this computer. See [Agent chat](#agent-chat).
+  from a llama.cpp server on the phone through Termux and `adb forward`. The
+  phone server can also be started from the app over ADB. Both use the same
+  model and prompt when it is installed, and the assistant can save files into
+  a folder on this computer. See [Agent chat](#agent-chat).
 - **Top bar:** phone name, **USB or Wi-Fi** transport, battery level and charging
   state.
 
@@ -384,33 +385,50 @@ model loads.
 
 ### A model on the phone
 
-Run a llama.cpp server inside Termux on the phone, then forward its port to the
-computer over the existing ADB connection:
+Install llama.cpp in Termux and leave a small start script in Termux's home:
 
 ```bash
 # in Termux on the phone
 pkg install llama-cpp
-llama-server -m model.gguf --host 127.0.0.1 --port 8080 --alias phone
 
-# on the computer, with the phone connected over USB or Wi-Fi ADB
-adb forward tcp:8080 tcp:8080
+cat > ~/start-phone-llama.sh <<'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock
+exec llama-server -m "$HOME/models/Qwen3.5-4B-Q4_K_M.gguf" \
+  --host 127.0.0.1 --port 8080 --alias phone \
+  --chat-template-kwargs '{"enable_thinking":false}'
+EOF
+chmod +x ~/start-phone-llama.sh
 ```
 
-`adb forward` maps the computer's `127.0.0.1:8080` to the phone's server, so
-the **Phone server** provider works without exposing Termux to the network. The
-provider's default model name is `phone`, matching the `--alias` above;
-llama.cpp ignores the name in single-model mode, so an unaliased server also
-works. The settings dialog has a **Set up ADB forward and test** button that
-runs the forward command and probes the endpoint. Phones are memory-constrained;
-small quantized models are the practical choice. Using the same file on both
-machines — `Qwen3.5-4B-Q4_K_M.gguf` here and on the phone — means the local and
-phone providers answer with identical weights.
+`adb forward tcp:8080 tcp:8080` maps the computer's `127.0.0.1:8080` to the
+phone's server, so the **Phone server** provider works without exposing Termux
+to the network. The provider's default model name is `phone`, matching the
+`--alias` above; llama.cpp ignores the name in single-model mode, so an
+unaliased server also works. The settings dialog has a **Set up ADB forward
+and test** button that runs the forward command and probes the endpoint.
+Phones are memory-constrained; small quantized models are the practical
+choice. Using the same file on both machines — `Qwen3.5-4B-Q4_K_M.gguf` here
+and on the phone — means the local and phone providers answer with identical
+weights.
 
-For a reasoning model, add
-`--chat-template-kwargs '{"enable_thinking":false}'` so replies are not spent
-on hidden chain-of-thought tokens. Keep Termux running (its wake lock is enough
-to keep the server alive in the background); the server stops when Termux is
-force-stopped.
+**Starting it from Phone Link.** You do not need to keep Termux open. When
+the Phone provider is selected and `/v1/models` does not answer, sending a
+message makes Phone Link run the forward command, check that Termux is
+installed, wake the screen, open Termux and type
+`/data/data/com.termux/files/home/start-phone-llama.sh` followed by Enter. It
+then waits up to two minutes for the endpoint. The phone must be **unlocked**
+(or have no secure lock) for those keystrokes to reach Termux; if the lock
+screen is up, the panel says so instead of typing. The phone and laptop share
+the USB or Wi-Fi ADB connection Phone Link already uses — Termux's
+`RUN_COMMAND` intent needs a permission a desktop app cannot hold, so ADB
+automation is used instead.
+
+For a reasoning model, keep
+`--chat-template-kwargs '{"enable_thinking":false}'` in the script so replies
+are not spent on hidden chain-of-thought tokens. The wake lock keeps the
+server alive in the background; it stops when Termux is force-stopped, and
+the next message starts it again.
 
 ### Saving files
 
@@ -616,7 +634,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 141 unit tests covering ADB parsing and selection, name/battery parsing,
+- 149 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -641,7 +659,9 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   oversized files), local server and model detection (including preferring the
   phone's Qwen3.5 weights), llama-server argument construction, cold start and
   stop against a fake server process, the panel's wait-for-local-server state,
-  saving files from a reply, ADB forward direction, plus headless panel and
+  saving files from a reply, starting the phone server through a fake ADB
+  (forward, Termux check, keyguard detection, typed command, timeout), the
+  panel's wait-for-phone state, ADB forward direction, plus headless panel and
   composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
@@ -674,13 +694,18 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   `--chat-template-kwargs '{"enable_thinking":false}'`; without it the same
   model spent its reply on hidden reasoning tokens. With the new shared
   prompt, the phone provider also answered with a `file:` block, and the app
-  saved it exactly as it does for the local provider.
+  saved it exactly as it does for the local provider. With the server stopped
+  and the phone locked, the ADB starter read the real keyguard state and
+  reported that the phone must be unlocked within a second, without typing.
 
 ### What was not tested
 
 - Custom cloud endpoints were not called during development. The phone
   provider was tested with a 4B model; larger or reasoning-heavy models on the
-  phone were not tried.
+  phone were not tried. The successful phone-start path (typing the script
+  into an unlocked Termux session) was exercised with a fake ADB runner; the
+  real phone was locked during the live check, so that sequence has not yet
+  been observed on the hardware.
 - Manual touch, mouse and keyboard interaction inside the embedded real scrcpy
   window. scrcpy's shortcut forwarding itself was verified: an XTest MOD+h sent
   to the embedded real scrcpy window moved the phone to its launcher, and a
