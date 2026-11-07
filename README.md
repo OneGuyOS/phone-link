@@ -291,7 +291,7 @@ the launcher, menu entry and icon (autostart is separate). `--prefix DIR`
 installs somewhere other than `~/.local`.
 
 On other distributions, `pip install .` provides the same `phone-link` console
-script but no menu entry or icon. Phone Link is versioned `1.1.0`;
+script but no menu entry or icon. Phone Link is versioned `1.1.1`;
 `phone-link --version` prints it. Releases are built by hand — the app does not
 auto-update itself.
 
@@ -749,7 +749,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 - Shortcuts: all twelve window shortcuts were registered (`F5`, `Ctrl+R`,
   `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+F`, `Ctrl+Shift+M`,
   `Ctrl+Shift+A`, `F11`, `F1`, `Ctrl+Q`, `Ctrl+W`), and the shortcut dialog
-  rendered with all eleven entries offscreen.
+  rendered with all twelve entries offscreen.
 - DeX: the mock run switched the frame to a 16:9 desktop, showed the Pop out
   button, popped DeX into a second fake scrcpy process while the main mirror
   stayed embedded, docked it again, and switched back to the phone frame. The
@@ -761,7 +761,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 - Pop out: with DeX off, **Pop out** moved the phone screen itself into a
   second fake scrcpy process, stopped the embedded mirror, showed the **Phone
   popped out** placeholder in the frame, and **Dock** restarted the embedded
-  phone mirror.
+  phone mirror. On the real phone the same flow removed the reparented scrcpy
+  window, opened a decorated 420×900 `Phone Link - phone` window, and brought
+  the embedded mirror back on Dock; closing the floating window also docked it
+  automatically.
 - Error states: a simulated KDE Connect offline snapshot showed the
   **KDE Connect is offline** empty state with a visible **Try again** button
   wired to a full refresh.
@@ -948,8 +951,8 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   computer.
 - The installer end to end in a temporary prefix: `scripts/install.sh` wrote
   the launcher, the desktop entry with a quoted `Exec`, and the icon; the
-  launcher answered `Phone Link 1.1.0`; and `--uninstall` removed the three
-  files. A pip wheel build produced `phone_link-1.1.0-py3-none-any.whl`. CI
+  launcher answered `Phone Link 1.1.1`; and `--uninstall` removed the three
+  files. A pip wheel build produced `phone_link-1.1.1-py3-none-any.whl`. CI
   repeats the entry-point and installer check on every push.
 
 ### What was not tested
