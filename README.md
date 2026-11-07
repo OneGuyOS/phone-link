@@ -1,5 +1,7 @@
 # Phone Link
 
+[![tests](https://github.com/OneGuyOS/phone-link/actions/workflows/tests.yml/badge.svg)](https://github.com/OneGuyOS/phone-link/actions/workflows/tests.yml)
+
 A small Debian / KDE Plasma desktop companion for Android, in the spirit of
 Windows Phone Link. One window contains:
 
