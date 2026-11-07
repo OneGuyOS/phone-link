@@ -280,7 +280,7 @@ the launcher, menu entry and icon (autostart is separate). `--prefix DIR`
 installs somewhere other than `~/.local`.
 
 On other distributions, `pip install .` provides the same `phone-link` console
-script but no menu entry or icon. Phone Link is versioned `1.0.0`;
+script but no menu entry or icon. Phone Link is versioned `1.0.1`;
 `phone-link --version` prints it. Releases are built by hand — the app does not
 auto-update itself.
 
@@ -887,8 +887,8 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   computer.
 - The installer end to end in a temporary prefix: `scripts/install.sh` wrote
   the launcher, the desktop entry with a quoted `Exec`, and the icon; the
-  launcher answered `Phone Link 1.0.0`; and `--uninstall` removed the three
-  files. A pip dry run built the package metadata as `phone-link-1.0.0`. CI
+  launcher answered `Phone Link 1.0.1`; and `--uninstall` removed the three
+  files. A pip wheel build produced `phone_link-1.0.1-py3-none-any.whl`. CI
   repeats the entry-point and installer check on every push.
 
 ### What was not tested
