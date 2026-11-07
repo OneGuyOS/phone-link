@@ -454,6 +454,35 @@ The settings dialog can query `/v1/models` on any OpenAI-compatible backend
 (**Fetch**) and can inspect an endpoint before saving it. The agent panel picks
 a reachable local provider on startup.
 
+### Getting the pieces
+
+Neither the server binary nor the model weights are bundled with Phone Link.
+Both built-in providers need llama.cpp, and each machine needs its own copy of
+the weights.
+
+1. **Install llama.cpp on the computer.** Download a current
+   `llama-*-bin-ubuntu-x64.tar.gz` from the
+   [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases),
+   extract it, and either put that directory on `PATH` or point
+   `PHONE_LINK_LLAMA_SERVER` at the `llama-server` inside it. Building from
+   source works too; the resulting binary is found the same way.
+2. **Get a model.** Download `Qwen3.5-4B-Q4_K_M.gguf` (2.7 GB) from
+   [unsloth/Qwen3.5-4B-GGUF](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF)
+   and put it in Phone Link's models directory:
+
+   ```bash
+   mkdir -p ~/.local/share/phone-link/models
+   mv ~/Downloads/Qwen3.5-4B-Q4_K_M.gguf ~/.local/share/phone-link/models/
+   ```
+
+   Any other GGUF instruct model works; set `PHONE_LINK_LOCAL_MODEL` to its
+   path if it lives elsewhere. Q4_K_M keeps the file under 3 GB, which matters
+   on the phone.
+
+Phone Link does not install either piece for you, but once they are in place it
+starts and stops the computer's server itself. The phone needs the same model
+file; [A model on the phone](#a-model-on-the-phone) covers copying it over.
+
 ### The local model
 
 Phone Link starts the local `llama-server` itself the first time **Zara Fast**
@@ -487,7 +516,21 @@ model loads.
 
 ### A model on the phone
 
-Install llama.cpp in Termux and leave a small start script in Termux's home:
+The phone needs the same `.gguf` file. Download it once on the computer, push
+it to the phone's shared storage, then move it into Termux's home directory:
+
+```bash
+# on the computer, with the phone connected over ADB
+adb push Qwen3.5-4B-Q4_K_M.gguf /sdcard/Download/
+
+# in Termux on the phone
+termux-setup-storage          # once; grants access to shared storage
+mkdir -p ~/models
+cp ~/storage/downloads/Qwen3.5-4B-Q4_K_M.gguf ~/models/
+```
+
+Then install llama.cpp in Termux and leave a small start script in Termux's
+home:
 
 ```bash
 # in Termux on the phone
