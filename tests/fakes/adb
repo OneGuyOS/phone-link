@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Test double for adb, used only by the UI integration test."""
+
+from __future__ import annotations
+
+import os
+import sys
+from datetime import datetime
+
+SERIAL = "MOCK123"
+LOG = os.environ.get("PHONE_LINK_FAKE_ADB_LOG", "/tmp/phone-link-fake-adb.log")
+OFFLINE_FILE = os.environ.get("PHONE_LINK_FAKE_ADB_OFFLINE_FILE", "")
+ROTATION_FILE = os.environ.get("PHONE_LINK_FAKE_ADB_ROTATION_FILE", "")
+
+DEVICES = f"""List of devices attached
+{SERIAL}\tdevice usb:1-1 product:r13sue model:Pixel_8_Pro device:r13s transport_id:1
+"""
+
+SERVICES = """List of discovered mdns services
+adb-MOCK123-a._adb-tls-pairing._tcp.\t192.168.1.50:37123
+adb-MOCK123-a._adb-tls-connect._tcp.\t192.168.1.50:37777
+"""
+
+def rotation() -> int:
+    if ROTATION_FILE:
+        try:
+            with open(ROTATION_FILE, encoding="utf-8") as handle:
+                value = int(handle.read().strip())
+            return value if 0 <= value <= 3 else 0
+        except (OSError, ValueError):
+            pass
+    return 0
+
+
+def shell_info() -> str:
+    current = rotation()
+    return f"""__PL_MODEL__
+Pixel 8 Pro
+__PL_MANUFACTURER__
+Google
+__PL_BATTERY__
+Current Battery Service state:
+  AC powered: false
+  USB powered: true
+  Wireless powered: false
+  status: 2
+  level: 76
+  scale: 100
+__PL_ROTATION__
+Viewport INTERNAL: displayId=0, uniqueId=local:123, orientation={current}, densityDpi=420
+"""
+
+
+def log(line: str) -> None:
+    try:
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write(f"{datetime.now().isoformat()} {line}\n")
+    except OSError:
+        pass
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args and args[0] == "devices":
+        if OFFLINE_FILE and os.path.exists(OFFLINE_FILE):
+            sys.stdout.write("List of devices attached\n")
+        else:
+            sys.stdout.write(DEVICES)
+        return 0
+
+    if args[:2] == ["mdns", "services"]:
+        sys.stdout.write(SERVICES)
+        return 0
+
+    if args and args[0] == "pair":
+        address = args[1] if len(args) > 1 else ""
+        code = args[2] if len(args) > 2 else ""
+        log(f"wifi pair {address} code={code}")
+        if code == "123456":
+            sys.stdout.write(f"Successfully paired to {address} [guid=adb-MOCK123]\n")
+            return 0
+        sys.stderr.write("Failed: Wrong pairing code\n")
+        return 1
+
+    if args and args[0] == "connect":
+        address = args[1] if len(args) > 1 else ""
+        log(f"wifi connect {address}")
+        sys.stdout.write(f"connected to {address}\n")
+        return 0
+
+    if "-s" in args:
+        index = args.index("-s")
+        rest = args[index + 2 :]
+        if rest[:2] == ["shell", "input"] and len(rest) >= 4:
+            log(f"keyevent {rest[3]}")
+            return 0
+        if rest[:3] == ["shell", "am", "broadcast"]:
+            device_id = ""
+            if "deviceId" in rest:
+                index = rest.index("deviceId")
+                if index + 1 < len(rest):
+                    device_id = rest[index + 1]
+            log(f"broadcast {device_id}")
+            sys.stdout.write("Broadcast completed: result=0\n")
+            return 0
+        if rest and rest[0] == "shell":
+            sys.stdout.write(shell_info())
+            return 0
+        return 0
+
+    if args and args[0] == "start-server":
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

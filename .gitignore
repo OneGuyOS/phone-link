@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+*.log
+# Demo recording, kept locally; it shows personal device content.
+phone-link-hub-xda-v3.mp4

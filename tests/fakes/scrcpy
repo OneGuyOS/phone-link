@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""A harmless fake scrcpy window for exercising the embed path in tests.
+
+It draws a test-pattern phone screen and never touches the real Android
+device or a private user's screen.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from datetime import datetime
+
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
+from PySide6.QtWidgets import QApplication, QWidget
+
+# Record key chords that reach this window (the mirror's scrcpy shortcuts).
+KEYS = os.environ.get("PHONE_LINK_FAKE_SCRCPY_KEYS", "")
+
+
+def argument(name: str, default: str = "") -> str:
+    try:
+        index = sys.argv.index(name)
+    except ValueError:
+        return default
+    if index + 1 >= len(sys.argv):
+        return default
+    return sys.argv[index + 1]
+
+
+class FakePhoneScreen(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle(argument("--window-title", "PhoneLinkTestPattern"))
+        flags = Qt.WindowType.Window
+        if "--window-borderless" in sys.argv:
+            flags |= Qt.WindowType.FramelessWindowHint
+        self.setWindowFlags(flags)
+        width = int(argument("--window-width", "300"))
+        height = int(argument("--window-height", "650"))
+        self.resize(max(180, width), max(360, height))
+        self.setMinimumSize(120, 240)
+        self._phase = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _tick(self) -> None:
+        self._phase = (self._phase + 0.09) % 1.0
+        self.update()
+
+    def keyPressEvent(self, event) -> None:
+        if KEYS:
+            combo = QKeySequence(event.keyCombination()).toString().lower()
+            try:
+                with open(KEYS, "a", encoding="utf-8") as handle:
+                    handle.write(combo + "\n")
+            except OSError:
+                pass
+        event.accept()
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w = float(self.width())
+        h = float(self.height())
+        gradient = QLinearGradient(0, 0, w, h)
+        gradient.setColorAt(0.0, QColor("#0c2033"))
+        gradient.setColorAt(0.55, QColor("#13243d"))
+        gradient.setColorAt(1.0, QColor("#2a1b3d"))
+        p.fillRect(self.rect(), gradient)
+
+        # A soft, slowly moving glow keeps it visibly live.
+        glow = QPainterPath()
+        cx = w * (0.30 + 0.25 * self._phase)
+        cy = h * 0.27
+        glow.addEllipse(QPointF(cx, cy), w * 0.55, w * 0.55)
+        p.fillPath(glow, QColor(61, 174, 233, 22))
+
+        p.setPen(QColor("#dceaf7"))
+        small = QFont("Noto Sans")
+        small.setPixelSize(max(9, int(w * 0.033)))
+        small.setWeight(QFont.Weight.DemiBold)
+        p.setFont(small)
+        now = datetime.now()
+        p.drawText(QRectF(w * 0.07, h * 0.022, w * 0.4, h * 0.04), Qt.AlignmentFlag.AlignVCenter, now.strftime("%H:%M"))
+        p.setPen(QColor("#8ea6bb"))
+        p.drawText(
+            QRectF(w * 0.43, h * 0.022, w * 0.46, h * 0.04),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            "Wi-Fi  76%",
+        )
+
+        clock = QFont("Noto Sans")
+        clock.setPixelSize(max(28, int(w * 0.155)))
+        clock.setWeight(QFont.Weight.DemiBold)
+        p.setFont(clock)
+        p.setPen(QColor("#f4faff"))
+        p.drawText(
+            QRectF(0, h * 0.10, w, h * 0.12),
+            Qt.AlignmentFlag.AlignCenter,
+            now.strftime("%H:%M"),
+        )
+        date = QFont("Noto Sans")
+        date.setPixelSize(max(9, int(w * 0.032)))
+        p.setFont(date)
+        p.setPen(QColor("#a9bccd"))
+        p.drawText(
+            QRectF(0, h * 0.215, w, h * 0.05),
+            Qt.AlignmentFlag.AlignCenter,
+            now.strftime("%A, %d %B"),
+        )
+
+        # Mock notification card.
+        card = QRectF(w * 0.07, h * 0.32, w * 0.86, h * 0.15)
+        p.setPen(QPen(QColor(255, 255, 255, 26), 1))
+        p.setBrush(QColor(244, 250, 255, 20))
+        p.drawRoundedRect(card, w * 0.05, w * 0.05)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#3daee9"))
+        p.drawRoundedRect(QRectF(card.x() + w * 0.04, card.y() + h * 0.027, w * 0.09, w * 0.09), w * 0.025, w * 0.025)
+        p.setFont(small)
+        p.setPen(QColor("#eaf5ff"))
+        p.drawText(
+            QRectF(card.x() + w * 0.16, card.y() + h * 0.018, card.width() * 0.75, h * 0.04),
+            Qt.AlignmentFlag.AlignVCenter,
+            "Test pattern",
+        )
+        p.setPen(QColor("#9fb3c5"))
+        smaller = QFont("Noto Sans")
+        smaller.setPixelSize(max(8, int(w * 0.027)))
+        p.setFont(smaller)
+        p.drawText(
+            QRectF(card.x() + w * 0.16, card.y() + h * 0.057, card.width() * 0.75, h * 0.07),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap),
+            "This is a fake screen used to test embedding.\nNo phone content is shown.",
+        )
+
+        # App grid.
+        icons = ("Messages", "Photos", "Maps", "Music", "Files", "Camera")
+        colors = ("#3daee9", "#56d68a", "#f1c45a", "#e18bf5", "#ff9d6b", "#8f9dff")
+        start_y = h * 0.53
+        cell_w = w / 3.0
+        cell_h = h * 0.115
+        for index, (label, color) in enumerate(zip(icons, colors)):
+            col = index % 3
+            row = index // 3
+            size = w * 0.13
+            x = col * cell_w + (cell_w - size) / 2
+            y = start_y + row * cell_h
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(color))
+            p.drawRoundedRect(QRectF(x, y, size, size), size * 0.28, size * 0.28)
+            p.setPen(QColor("#dbeaf6"))
+            p.setFont(smaller)
+            p.drawText(
+                QRectF(col * cell_w, y + size + h * 0.006, cell_w, h * 0.028),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                label,
+            )
+
+        # Bottom dock.
+        dock = QRectF(w * 0.09, h * 0.82, w * 0.82, h * 0.11)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 255, 255, 20))
+        p.drawRoundedRect(dock, h * 0.055, h * 0.055)
+        for index in range(4):
+            size = w * 0.095
+            x = dock.x() + (index + 0.5) * dock.width() / 4 - size / 2
+            y = dock.y() + (dock.height() - size) / 2
+            p.setBrush(QColor(colors[index]))
+            p.drawRoundedRect(QRectF(x, y, size, size), size * 0.3, size * 0.3)
+
+        p.setFont(smaller)
+        p.setPen(QColor(255, 255, 255, 72))
+        p.drawText(
+            QRectF(0, h - h * 0.035, w, h * 0.025),
+            Qt.AlignmentFlag.AlignCenter,
+            "PHONE LINK TEST PATTERN",
+        )
+        p.end()
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    window = FakePhoneScreen()
+    window.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
