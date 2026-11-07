@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import (
@@ -16,6 +17,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QMainWindow,
     QMenu,
@@ -35,6 +37,12 @@ from ..dependencies import DependencyReport
 from ..kdeconnect import DAEMON_PATH, KdeConnectClient
 from ..models import KdeSnapshot, MediaState, PhoneSnapshot
 from ..phone_context import build_phone_context
+from ..photos import (
+    PhotoImporter,
+    default_photo_folder,
+    load_state as load_photo_state,
+    save_state as save_photo_state,
+)
 from ..sms import SmsClient
 from ..wifi import WirelessReconnector
 from .agent_panel import AgentPanel
@@ -51,11 +59,30 @@ from .wifi_dialog import WifiConnectDialog
 
 class MainWindow(QMainWindow):
     ADB_REFRESH_MS = 2_500
+    PHOTO_POLL_MS = 60_000
 
     def __init__(self, report: DependencyReport) -> None:
         super().__init__()
         self.report = report
         self._settings = QSettings()
+        self._photo_auto = bool(
+            self._settings.value("photos/auto", False, type=bool)
+        )
+        self._photo_folder = Path(
+            self._settings.value("photos/folder", "", type=str)
+            or default_photo_folder()
+        )
+        self._photo_state = load_photo_state()
+        if self._photo_auto and self._photo_state.since <= 0:
+            # Turning this on must not copy the phone's entire camera roll.
+            self._photo_state.since = int(time.time())
+            try:
+                save_photo_state(self._photo_state)
+            except OSError:
+                pass
+        self._photo_serial: str | None = None
+        self._photo_manual = False
+        self._photo_error_shown = False
         self.setWindowTitle("Phone Link")
         self.setWindowIcon(app_icon())
         self.setMinimumSize(980, 680)
@@ -91,6 +118,12 @@ class MainWindow(QMainWindow):
         self.phone_menu.smsRequested.connect(self._open_sms_dialog)
         self.phone_menu.volumeRequested.connect(self._open_phone_volume)
         self.phone_menu.openMessagesRequested.connect(self._open_phone_messages)
+        self.phone_menu.photoImportRequested.connect(
+            lambda: self._import_photos(manual=True)
+        )
+        self.phone_menu.photoFolderRequested.connect(self._choose_photo_folder)
+        self.phone_menu.photoFolderOpenRequested.connect(self._open_photo_folder)
+        self.phone_menu.autoPhotosToggled.connect(self._set_photo_auto_import)
         self.phone_menu.aboutToShow.connect(self._refresh_phone_menu)
         self.header.set_phone_menu(self.phone_menu)
         self._volume_dialog: VolumeDialog | None = None
@@ -182,6 +215,20 @@ class MainWindow(QMainWindow):
         self.adb.ringStopped.connect(
             lambda: self._flash("Stopped ringing the phone.")
         )
+
+        self.photos = PhotoImporter(report.adb_path, self)
+        self.photos.folder = self._photo_folder
+        self.photos.state = self._photo_state
+        self.photos.finished.connect(self._on_photos_finished)
+        self.photos.failed.connect(self._on_photos_failed)
+
+        self._photo_timer = QTimer(self)
+        self._photo_timer.setInterval(self.PHOTO_POLL_MS)
+        self._photo_timer.timeout.connect(
+            lambda: self._import_photos(manual=False)
+        )
+        if self._photo_auto:
+            self._photo_timer.start()
 
         self.wifi_reconnect = WirelessReconnector(report.adb_path, self)
         self.wifi_reconnect.last_address = self._settings.value(
@@ -412,6 +459,12 @@ class MainWindow(QMainWindow):
         elif self.wifi_reconnect.last_address and self.wifi_reconnect.reconnect():
             if previous is not None:
                 self._flash("Phone disconnected — trying Wi-Fi…")
+
+        if selected is None:
+            self._photo_serial = None
+        elif self._photo_auto and selected.serial != self._photo_serial:
+            self._photo_serial = selected.serial
+            self._import_photos(manual=False)
 
         if selected is None:
             if self._mirror_target is not None:
@@ -700,6 +753,107 @@ class MainWindow(QMainWindow):
             noun = "file" if len(files) == 1 else "files"
             self._flash(f"Sending {len(files)} {noun} to {name}…")
 
+    def _set_photo_auto_import(self, checked: bool) -> None:
+        self._photo_auto = bool(checked)
+        self._settings.setValue("photos/auto", self._photo_auto)
+        self._settings.sync()
+        if not self._photo_auto:
+            self._photo_timer.stop()
+            self._flash("Automatic camera-photo import is off.")
+            return
+        if self._photo_state.since <= 0:
+            self._photo_state.since = int(time.time())
+            self._save_photo_state()
+        self._photo_timer.start()
+        self._flash("Automatic camera-photo import is on.")
+        self._import_photos(manual=False)
+
+    def _import_photos(self, *, manual: bool) -> None:
+        selected = self._adb_snapshot.selected
+        if selected is None:
+            if manual:
+                self._flash("Connect the phone over ADB to import camera photos.")
+            return
+        if self.photos.is_busy:
+            if manual:
+                self._flash("A photo import is already running.")
+            return
+        self.photos.serial = selected.serial
+        self.photos.folder = self._photo_folder
+        self.photos.state = self._photo_state
+        self._photo_manual = manual
+        since = 0 if manual else self._photo_state.since
+        if not self.photos.start(since=since):
+            if manual:
+                self._flash("A photo import is already running.")
+            return
+        if manual:
+            self._flash(f"Looking for camera photos for {self._photo_folder}…")
+
+    def _save_photo_state(self) -> None:
+        try:
+            save_photo_state(self._photo_state)
+        except OSError as exc:
+            self._flash(f"Could not save photo-import state: {exc}")
+
+    def _on_photos_finished(
+        self, imported: int, duplicates: int, failed: int
+    ) -> None:
+        self._photo_error_shown = False
+        self._save_photo_state()
+        manual = self._photo_manual
+        self._photo_manual = False
+        if failed:
+            detail = self.photos.last_errors[0] if self.photos.last_errors else ""
+            if imported:
+                self._flash(
+                    f"Imported {imported} photo(s); {failed} could not be copied."
+                )
+            elif detail:
+                self._flash(f"Could not import {failed} photo(s): {detail}")
+            else:
+                self._flash(f"Could not import {failed} photo(s).")
+            return
+        if imported:
+            noun = "photo" if imported == 1 else "photos"
+            self._flash(
+                f"Imported {imported} {noun} to {self._photo_folder}."
+            )
+            return
+        if manual:
+            self._flash("No new camera photos to import.")
+
+    def _on_photos_failed(self, message: str) -> None:
+        if self._photo_error_shown:
+            return
+        self._photo_error_shown = True
+        self._flash(message)
+
+    def _choose_photo_folder(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            "Choose where to save camera photos",
+            str(self._photo_folder),
+        )
+        if not chosen:
+            return
+        self._photo_folder = Path(chosen)
+        self.photos.folder = self._photo_folder
+        self._settings.setValue("photos/folder", str(self._photo_folder))
+        self._settings.sync()
+        self._flash(f"Camera photos will be saved in {self._photo_folder}.")
+
+    def _open_photo_folder(self) -> None:
+        try:
+            self._photo_folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._flash(f"Could not create {self._photo_folder}: {exc}")
+            return
+        if not QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(self._photo_folder))
+        ):
+            self._flash(f"Camera photos are saved in {self._photo_folder}.")
+
     def _media_action(self, action: str) -> None:
         self.kde.media_action(action)
 
@@ -725,6 +879,11 @@ class MainWindow(QMainWindow):
         self.phone_menu.set_cellular_status(
             self.kde.cellular_status() if connected else None,
             connected=connected,
+        )
+        self.phone_menu.set_photo_state(
+            self._adb_snapshot.selected is not None,
+            self._photo_auto,
+            str(self._photo_folder),
         )
 
     def _find_phone(self) -> None:
@@ -857,6 +1016,8 @@ class MainWindow(QMainWindow):
             return
         self._clipboard_timer.stop()
         self._adb_timer.stop()
+        self._photo_timer.stop()
+        self.photos.stop()
         self.mirror.stop()
         self.adb.stop()
         self.agent_panel.shutdown()

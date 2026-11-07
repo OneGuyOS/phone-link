@@ -34,6 +34,12 @@ Windows Phone Link. One window contains:
   header's **Files** button mounts the phone's storage over KDE Connect (SFTP
   via sshfs) and opens it in the desktop's file manager, so files can be dragged
   out to the desktop or in to the phone.
+- **Camera photos:** the ⋯ menu can copy still photos from the phone's
+  `DCIM/Camera` folder to `~/Pictures/Phone Link` (or another folder) over ADB.
+  Automatic import is off by default and only copies photos taken after it is
+  enabled; **Import camera photos now** catches up the existing camera roll.
+  Original filenames and bytes are kept, and already imported files are not
+  copied again. See [Camera photos](#camera-photos).
 - **Wi-Fi:** the header's Wi-Fi button pairs Android wireless debugging inside
   the app using a QR code the phone scans, then connects the phone over the
   network, so the mirror can run without a cable.
@@ -392,6 +398,41 @@ available, and a multi-SIM phone sends from its default SIM.
 
 ---
 
+## Camera photos
+
+Phone Link can copy still photos from the phone's `DCIM/Camera` folder to this
+computer over ADB. It needs no KDE Connect plugin and uploads nothing.
+
+Open the header's **⋯** menu → **Camera photos**:
+
+- **Import new photos automatically** is off by default. Turning it on records
+  the current time as a starting point and checks the phone once a minute while
+  an ADB device is connected. Photos taken before it was enabled are not
+  copied, so enabling it does not dump the whole camera roll.
+- **Import camera photos now** copies every camera photo that has not already
+  been saved, including older ones. Use it for the first catch-up.
+- **Choose photo folder…** changes the destination. The default is
+  `~/Pictures/Phone Link`; the app does not read the desktop's XDG Pictures
+  setting.
+- **Open photo folder** opens the destination in the file manager.
+
+Each photo keeps its original filename and bytes. A local file with the same
+name and size is treated as already imported; a same-named file with different
+contents gets `-1`, `-2`, … rather than being overwritten. The newest imported
+date and a bounded list of MediaStore rows are kept in
+`$XDG_DATA_HOME/phone-link/photos.json` (by default
+`~/.local/share/phone-link/photos.json`) with owner-only permissions. Deleting
+that file makes the next manual import re-check the camera roll; same-name and
+same-size files are still not duplicated.
+
+Only still images under `DCIM/Camera` are imported. Videos, screenshots in
+`DCIM/Screenshots`, and other albums are left alone. Import runs over ADB, so
+it needs USB debugging or wireless debugging; KDE Connect by itself is not
+enough. The phone needs no extra app or permission beyond the normal ADB shell
+access.
+
+---
+
 ## Agent chat
 
 The right panel has **Notifications / Messages / Agent** tabs (`Ctrl+Shift+A`
@@ -611,7 +652,9 @@ Both built-in providers keep the conversation on this computer or on your own
 phone. A custom endpoint receives the transcript and the system prompt; nothing
 else is sent. The system prompt explicitly tells the model it cannot see the
 phone unless you describe it, so it will not pretend to read notifications or
-messages. Saved files are written locally and are never uploaded.
+messages. Saved files are written locally and are never uploaded. Camera
+photos are copied directly from the phone over ADB to the folder you choose;
+they do not pass through an agent or any remote service.
 
 ---
 
@@ -791,11 +834,14 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 202 unit tests covering ADB parsing and selection, name/battery parsing,
+- 228 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, automatic wireless reconnection (same host, changed port, other
-  hosts ignored, cooldown), which mirror owns DeX audio, notification
+  hosts ignored, cooldown), which mirror owns DeX audio, camera-photo import
+  (MediaStore row parsing and filtering, the date watermark, safe filenames,
+  same-name/size deduplication, numeric suffixes, failed-pull retry, the
+  owner-only state file and its cap), notification
   fallbacks, KDE snapshot state, recent-history ordering,
   bounds and persistence, the owner-only atomic history file (including corrupt
   and partial records), notification search matching, install-command targeting
@@ -836,6 +882,12 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   headlessly against the real daemon and produced the conversation list in the
   real `MainWindow`. The parser was exercised on both of gdbus's quoting styles
   because real message bodies contain apostrophes.
+- Camera-photo import against the live phone: the MediaStore query returned the
+  camera rows, the app pulled the newest photo over `adb exec-out cat` into a
+  temporary folder, and the saved file matched the size the phone reported.
+  The state recorded the row and the photo's date, which is what a later pass
+  uses to skip it. The test used a temporary destination, so no personal
+  photos were added to the real `~/Pictures/Phone Link`.
 - Agent chat against the live local **Zara Fast** llama.cpp server on this
   computer: a question sent from the panel streamed back token by token, the
   provider was auto-selected on startup, and the transcript, Stop button and
@@ -1008,6 +1060,13 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   Link shows no transfer progress. Android cannot start a drag from its own
   file-manager screen out to the computer, so the drag always starts from the
   computer side of the mounted folder.
+- **Camera photos** are imported only from `DCIM/Camera`, only while ADB can
+  see the phone, and only still images; videos, screenshots and other albums
+  are ignored. Automatic import starts at the moment it is enabled, so older
+  photos need **Import camera photos now**. A failed pull is retried on the
+  next scan. The seen list is capped at 2,000 rows, and after the state file is
+  lost a same-name/same-size file is treated as already imported. Import reads
+  whole photos into memory and skips anything over 100 MB.
 - Clipboard is **send-only from this app**: the button pushes the desktop
   clipboard to the phone. Phone→desktop clipboard is done by KDE Connect's
   daemon.
@@ -1241,6 +1300,7 @@ phone_link/          application code
   chat_store.py      the saved agent transcript
   local_server.py    finds and starts the local llama.cpp model
   phone_context.py   the read-only phone snapshot for the agent
+  photos.py          camera-photo import over ADB and its saved state
   sms.py             SMS conversation client (gdbus calls and monitor parsing)
   ui/                window, header, mirror stage, notification panel,
                      Messages tab, agent chat

@@ -38,6 +38,10 @@ class PhoneActionsMenu(QMenu):
     smsRequested = Signal()
     volumeRequested = Signal()
     openMessagesRequested = Signal()
+    photoImportRequested = Signal()
+    photoFolderRequested = Signal()
+    photoFolderOpenRequested = Signal()
+    autoPhotosToggled = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -71,6 +75,34 @@ class PhoneActionsMenu(QMenu):
             lambda _checked=False: self.openMessagesRequested.emit()
         )
 
+        self.addSeparator()
+        self.photo_menu = self.addMenu(
+            glyph_icon("folder", TEXT_SOFT, 16), "Camera photos"
+        )
+        self.photo_menu.setToolTipsVisible(True)
+        self.auto_photos_action = self.photo_menu.addAction(
+            "Import new photos automatically"
+        )
+        self.auto_photos_action.setCheckable(True)
+        self.auto_photos_action.toggled.connect(self.autoPhotosToggled)
+        self.import_photos_action = self.photo_menu.addAction(
+            "Import camera photos now"
+        )
+        self.import_photos_action.triggered.connect(
+            lambda _checked=False: self.photoImportRequested.emit()
+        )
+        self.photo_menu.addSeparator()
+        self.photo_folder_action = self.photo_menu.addAction(
+            "Choose photo folder…"
+        )
+        self.photo_folder_action.triggered.connect(
+            lambda _checked=False: self.photoFolderRequested.emit()
+        )
+        self.open_photos_action = self.photo_menu.addAction("Open photo folder")
+        self.open_photos_action.triggered.connect(
+            lambda _checked=False: self.photoFolderOpenRequested.emit()
+        )
+
         # Each action needs a plugin the desktop daemon must have loaded for
         # this device.  Not every KDE Connect client supports every plugin:
         # Android's volume plugin only lets the phone control the computer,
@@ -99,6 +131,18 @@ class PhoneActionsMenu(QMenu):
             supported = plugins is None or plugin in plugins
             action.setVisible(supported)
             action.setEnabled(available and supported)
+
+    def set_photo_state(
+        self, available: bool, automatic: bool, folder: str
+    ) -> None:
+        """Camera-photo actions need ADB, not a KDE Connect plugin."""
+
+        self.import_photos_action.setEnabled(available)
+        self.auto_photos_action.blockSignals(True)
+        self.auto_photos_action.setChecked(bool(automatic))
+        self.auto_photos_action.blockSignals(False)
+        self.photo_folder_action.setToolTip(f"Save camera photos in {folder}")
+        self.open_photos_action.setToolTip(f"Open {folder}")
 
     def set_cellular_status(
         self, status: tuple[str, int] | None, *, connected: bool = True
