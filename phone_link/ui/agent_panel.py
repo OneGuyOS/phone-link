@@ -354,6 +354,7 @@ class AgentPanel(QWidget):
         self._pending_local_send = True
         self.input.setEnabled(False)
         self.send_button.setEnabled(False)
+        self.stop_button.setVisible(True)
         self.status.setText("Starting the local model…")
         self.local_server.ensure_started()
 
@@ -363,6 +364,7 @@ class AgentPanel(QWidget):
         self._pending_local_send = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.stop_button.setVisible(False)
         self.send(_local_ready=True)
 
     def _local_failed(self, message: str) -> None:
@@ -371,6 +373,7 @@ class AgentPanel(QWidget):
         self._pending_local_send = False
         self.input.setEnabled(True)
         self.send_button.setEnabled(True)
+        self.stop_button.setVisible(False)
         self._update_status()
         self._add_bubble("error", message)
 
@@ -441,6 +444,7 @@ class AgentPanel(QWidget):
             self.local_server.stop()
             self.input.setEnabled(True)
             self.send_button.setEnabled(True)
+            self.stop_button.setVisible(False)
             self._update_status()
         if self._chat is not None:
             self._chat.cancel()

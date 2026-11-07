@@ -79,6 +79,35 @@ class AgentPanelTests(unittest.TestCase):
         self.assertEqual(self._bubble_roles(), [])
         self.assertEqual(self.panel.input.toPlainText(), "")
 
+    def test_zara_fast_starts_the_managed_server_before_sending(self) -> None:
+        provider = Provider(
+            id="zara-fast",
+            label="Zara Fast",
+            kind="openai",
+            base_url="http://127.0.0.1:9/v1",
+            model="zara-fast",
+            local=True,
+        )
+        self.store.providers = [provider]
+        self.store.active_id = "zara-fast"
+        self.panel._provider = provider
+        self.panel.input.setPlainText("hello")
+        with mock.patch.object(
+            self.panel.local_server, "is_ready", return_value=False
+        ):
+            with mock.patch.object(
+                self.panel.local_server, "ensure_started"
+            ) as ensure:
+                self.panel.send()
+        ensure.assert_called_once()
+        self.assertTrue(self.panel._pending_local_send)
+        self.assertEqual(self.panel.input.toPlainText(), "hello")
+        self.assertFalse(self.panel.input.isEnabled())
+        self.assertEqual(self._bubble_roles(), [])
+        self.panel.stop()
+        self.assertFalse(self.panel._pending_local_send)
+        self.assertTrue(self.panel.input.isEnabled())
+
 
 class ChatInputTests(unittest.TestCase):
     @classmethod

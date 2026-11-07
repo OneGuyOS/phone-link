@@ -573,7 +573,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 128 unit tests covering ADB parsing and selection, name/battery parsing,
+- 129 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -595,8 +595,8 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   Claude/Codex argv and event parsing, provider storage with `0600`
   permissions, dropping providers removed from the presets, local server and
   model detection, llama-server argument construction, cold start and stop
-  against a fake server process, ADB forward direction,
-  plus headless panel and composer tests).
+  against a fake server process, the panel's wait-for-local-server state,
+  ADB forward direction, plus headless panel and composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
   counts, and loaded thread pages 50 messages at a time using
