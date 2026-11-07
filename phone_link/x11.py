@@ -2,7 +2,9 @@
 
 This is deliberately small: scrcpy creates a normal X11 window and we make it
 a child of the Qt screen container.  Input continues to be handled by scrcpy's
-native window, so keyboard and mouse forwarding stay intact.
+native window, so keyboard and mouse forwarding stay intact.  Keyboard focus
+follows the clicks: into the picture for typing on the phone, and back to the
+app window for its own shortcuts.
 """
 
 from __future__ import annotations
@@ -22,6 +24,11 @@ _UTF8_STRING = "UTF8_STRING"
 _NET_WM_NAME = "_NET_WM_NAME"
 _RevertToParent = 2
 _CurrentTime = 0
+# XEvent is a union of at most 24 longs; 192 bytes cover every 64-bit layout.
+_XEVENT_SIZE = 192
+_GenericEvent = 35
+_XI_RawButtonPress = 15
+_XIAllMasterDevices = 1
 
 
 class _XErrorEvent(ctypes.Structure):
@@ -33,6 +40,25 @@ class _XErrorEvent(ctypes.Structure):
         ("error_code", ctypes.c_ubyte),
         ("request_code", ctypes.c_ubyte),
         ("minor_code", ctypes.c_ubyte),
+    ]
+
+
+class _XGenericEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("extension", ctypes.c_int),
+        ("evtype", ctypes.c_int),
+    ]
+
+
+class _XIEventMask(ctypes.Structure):
+    _fields_ = [
+        ("deviceid", ctypes.c_int),
+        ("mask_len", ctypes.c_int),
+        ("mask", ctypes.POINTER(ctypes.c_ubyte)),
     ]
 
 
@@ -71,6 +97,7 @@ class X11Display:
         self._dpy = self._lib.XOpenDisplay(self.display_name.encode("utf-8"))
         if not self._dpy:
             raise X11Error(f"Could not open X display {self.display_name!r}.")
+        self._xi, self._xi_opcode = self._open_xinput()
         self._utf8_atom = self._lib.XInternAtom(self._dpy, _UTF8_STRING.encode(), False)
         self._net_wm_name_atom = self._lib.XInternAtom(self._dpy, _NET_WM_NAME.encode(), False)
         # Keep the ctypes callback alive for the lifetime of this object.
@@ -78,6 +105,46 @@ class X11Display:
             self._on_x_error
         )
         self._last_error = 0
+
+    def _open_xinput(self):
+        """Load libXi and look up the XInput extension opcode, if possible."""
+
+        library = ctypes.util.find_library("Xi")
+        if not library:
+            return None, 0
+        try:
+            xi = ctypes.CDLL(library)
+        except OSError:
+            return None, 0
+        xi.XIQueryVersion.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        xi.XIQueryVersion.restype = ctypes.c_int
+        xi.XISelectEvents.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(_XIEventMask),
+            ctypes.c_int,
+        ]
+        xi.XISelectEvents.restype = ctypes.c_int
+        major = ctypes.c_int(2)
+        minor = ctypes.c_int(0)
+        if xi.XIQueryVersion(self._dpy, ctypes.byref(major), ctypes.byref(minor)):
+            return None, 0
+        opcode = ctypes.c_int()
+        event_base = ctypes.c_int()
+        error_base = ctypes.c_int()
+        if not self._lib.XQueryExtension(
+            self._dpy,
+            b"XInputExtension",
+            ctypes.byref(opcode),
+            ctypes.byref(event_base),
+            ctypes.byref(error_base),
+        ):
+            return None, 0
+        return xi, int(opcode.value)
 
     def _configure_signatures(self) -> None:
         lib = self._lib
@@ -168,6 +235,24 @@ class X11Display:
             ctypes.POINTER(ctypes.c_uint),
         ]
         lib.XQueryPointer.restype = ctypes.c_int
+        lib.XQueryExtension.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        lib.XQueryExtension.restype = ctypes.c_int
+        lib.XGetInputFocus.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        lib.XGetInputFocus.restype = ctypes.c_int
+        lib.XPending.argtypes = [ctypes.c_void_p]
+        lib.XPending.restype = ctypes.c_int
+        lib.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        lib.XNextEvent.restype = ctypes.c_int
 
     @property
     def display(self) -> int:
@@ -324,9 +409,8 @@ class X11Display:
         self._with_errors_ignored(operation)
         if self._last_error:
             raise X11Error(f"X11 refused to embed the scrcpy window (error {self._last_error}).")
-        # Focus is a best-effort operation; a refused focus must not turn a
-        # successfully embedded picture into a failure.
-        self.focus(child)
+        # Keyboard focus is left to the caller: taking it here would steal it
+        # from the app even when the user was typing there before a restart.
 
     def set_geometry(self, child: int, width: int, height: int) -> None:
         width = max(1, int(width))
@@ -360,12 +444,91 @@ class X11Display:
 
         self._with_errors_ignored(operation)
 
-    def focus(self, child: int) -> None:
+    def focus(self, window: int) -> None:
         def operation() -> None:
-            self._lib.XSetInputFocus(self._dpy, child, _RevertToParent, _CurrentTime)
+            self._lib.XSetInputFocus(self._dpy, window, _RevertToParent, _CurrentTime)
             self._lib.XFlush(self._dpy)
 
         self._with_errors_ignored(operation)
+
+    def input_focus(self) -> int:
+        """The X window that currently receives keyboard input (0 if unknown)."""
+
+        focus = ctypes.c_ulong()
+        revert = ctypes.c_int()
+        if not self._lib.XGetInputFocus(self._dpy, ctypes.byref(focus), ctypes.byref(revert)):
+            return 0
+        # PointerRoot (1) and None (0) are not window ids worth comparing.
+        return int(focus.value) if int(focus.value) > 1 else 0
+
+    def watch_raw_button_presses(self) -> bool:
+        """Start receiving pointer button presses anywhere on the screen.
+
+        scrcpy grabs the pointer while a button is held, so ordinary event
+        selection on its window does not see a click.  XI2 raw events are
+        delivered regardless of grabs and focus; they carry no window, so the
+        caller hit-tests the pointer when one arrives.
+        """
+
+        xi = self._xi
+        if xi is None or not self._xi_opcode:
+            return False
+        mask = (ctypes.c_ubyte * 2)()
+        mask[_XI_RawButtonPress // 8] |= 1 << (_XI_RawButtonPress % 8)
+        event_mask = _XIEventMask(
+            _XIAllMasterDevices,
+            len(mask),
+            ctypes.cast(mask, ctypes.POINTER(ctypes.c_ubyte)),
+        )
+        root = self._lib.XDefaultRootWindow(self._dpy)
+        status = xi.XISelectEvents(self._dpy, root, ctypes.byref(event_mask), 1)
+        self._lib.XFlush(self._dpy)
+        return status == 0
+
+    def take_raw_button_press(self) -> bool:
+        """Drain queued X events, returning True for a pointer button press."""
+
+        pressed = False
+        xi = self._xi
+        if xi is None:
+            return False
+        pending = int(self._lib.XPending(self._dpy))
+        for _ in range(pending):
+            buffer = ctypes.create_string_buffer(_XEVENT_SIZE)
+            self._lib.XNextEvent(self._dpy, buffer)
+            event = ctypes.cast(buffer, ctypes.POINTER(_XGenericEvent)).contents
+            if (
+                int(event.type) == _GenericEvent
+                and int(event.extension) == self._xi_opcode
+                and int(event.evtype) == _XI_RawButtonPress
+            ):
+                pressed = True
+        return pressed
+
+    def pointer_inside(self, window: int, width: int, height: int) -> bool:
+        """Whether the pointer is within a window's client area."""
+
+        root_return = ctypes.c_ulong()
+        child_return = ctypes.c_ulong()
+        root_x = ctypes.c_int()
+        root_y = ctypes.c_int()
+        win_x = ctypes.c_int()
+        win_y = ctypes.c_int()
+        mask = ctypes.c_uint()
+        ok = self._lib.XQueryPointer(
+            self._dpy,
+            window,
+            ctypes.byref(root_return),
+            ctypes.byref(child_return),
+            ctypes.byref(root_x),
+            ctypes.byref(root_y),
+            ctypes.byref(win_x),
+            ctypes.byref(win_y),
+            ctypes.byref(mask),
+        )
+        if not ok:
+            return False
+        return 0 <= int(win_x.value) < int(width) and 0 <= int(win_y.value) < int(height)
 
     def send_key_combo(self, *keysyms: str) -> bool:
         """Send a modifier+key chord through XTest to the focused window.

@@ -95,6 +95,13 @@ Windows Phone Link. One window contains:
 Mouse clicks, touch input and keyboard events go to the real scrcpy window, so
 the usual scrcpy controls apply. There is no custom Android companion app.
 
+Keyboard focus follows what you click. Clicking the picture puts the keyboard
+into scrcpy, so typing and scrcpy shortcuts go to the phone; clicking anywhere
+on Phone Link's own window brings the keyboard back, so the shortcuts below
+work again. Restarting the mirror, for example when switching to DeX or
+starting a recording, keeps the keyboard where it was, and a popped-out
+recording hands focus back to the main window when the floating window opens.
+
 **Milestone 3 is complete.** Mirror audio can be forwarded to the computer with
 the speaker button; it is off by default and remembered across restarts. Media
 controls and phone-file access are in place too: the now-playing bar drives the
@@ -977,8 +984,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 - Custom cloud endpoints were not called during development. The phone
   provider was tested with a 4B model; larger or reasoning-heavy models on the
   phone were not tried.
-- Manual touch, mouse and keyboard interaction inside the embedded real scrcpy
-  window. scrcpy's shortcut forwarding itself was verified: an XTest MOD+h sent
+- Manual touch and mouse interaction inside the embedded real scrcpy window.
+  Keyboard focus switching was checked with synthesized clicks: a click on the
+  picture sent keys to the phone, a click on the app handed the shortcuts
+  back. scrcpy's shortcut forwarding itself was verified: an XTest MOD+h sent
   to the embedded real scrcpy window moved the phone to its launcher, and a
   right-click on the real floating DeX window opened a context menu. The
   embedded-DeX nav-button route was exercised end to end in the mock run; it was

@@ -58,6 +58,7 @@ class ScrcpySession(QObject):
         self._suppress_stopped = False
         self._embedded = False
         self._ever_embedded = False
+        self._had_keyboard_focus = False
         self._saw_crash = False
         self._found_child = 0
         self._found_at = 0
@@ -70,6 +71,12 @@ class ScrcpySession(QObject):
         self._poll = QTimer(self)
         self._poll.setInterval(100)
         self._poll.timeout.connect(self._poll_for_window)
+
+        # A click on the embedded picture moves keyboard focus into scrcpy, so
+        # typing goes to the phone; the app's own shortcuts take it back.
+        self._focus_watch = QTimer(self)
+        self._focus_watch.setInterval(120)
+        self._focus_watch.timeout.connect(self._watch_mirror_clicks)
 
         # In floating mode there is nothing to embed, so report success once
         # scrcpy has had time to get past its startup handshake.
@@ -118,6 +125,9 @@ class ScrcpySession(QObject):
         floating: bool = False,
         record_path: str | None = None,
     ) -> None:
+        # Remember where the keyboard was so a restart (DeX toggle, recording)
+        # does not move it away from the user's current focus.
+        self._had_keyboard_focus = self._keyboard_is_on_mirror()
         self.stop(silent=True)
         if audio is not None:
             self._audio = bool(audio)
@@ -203,6 +213,26 @@ class ScrcpySession(QObject):
         if self._embedded and self._child_window and self._x11:
             self._x11.focus(self._child_window)
 
+    def focus_app(self, window: int) -> None:
+        """Give keyboard focus back to the app's own X window."""
+
+        if self._x11 is not None and window:
+            self._x11.focus(int(window))
+
+    def _keyboard_is_on_mirror(self) -> bool:
+        if not (self._embedded and self._child_window and self._x11):
+            return False
+        return self._x11.input_focus() == self._child_window
+
+    def _watch_mirror_clicks(self) -> None:
+        if not (self._embedded and self._child_window and self._x11):
+            self._focus_watch.stop()
+            return
+        if self._x11.take_raw_button_press() and self._x11.pointer_inside(
+            self._child_window, self._width, self._height
+        ):
+            self._x11.focus(self._child_window)
+
     def refresh(self) -> bool:
         """Make scrcpy repaint after its window was resized externally."""
 
@@ -238,6 +268,7 @@ class ScrcpySession(QObject):
         self._stopping = True
         self._suppress_stopped = silent
         self._poll.stop()
+        self._focus_watch.stop()
         self._floating_timer.stop()
         process = self._process
         if process is not None and process.state() != QProcess.ProcessState.NotRunning:
@@ -319,7 +350,10 @@ class ScrcpySession(QObject):
         self._child_window = int(child)
         self._embedded = True
         self._ever_embedded = True
-        self._x11.focus(self._child_window)
+        self._x11.watch_raw_button_presses()
+        self._focus_watch.start()
+        if self._had_keyboard_focus:
+            self._x11.focus(self._child_window)
         self.embedded.emit(self._child_window)
         self.statusChanged.emit("embedded", "Live")
 

@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QCloseEvent,
     QDesktopServices,
@@ -294,6 +294,21 @@ class MainWindow(QMainWindow):
         self._update_header()
         self._install_shortcuts()
         self._setup_tray()
+        # Keyboard focus lives in the embedded mirror while the phone is being
+        # typed into.  Clicking any of the app's own widgets hands it back so
+        # the keyboard shortcuts work again.
+        application = QApplication.instance()
+        if application is not None:
+            application.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt override
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and isinstance(watched, QWidget)
+            and watched.window() is self
+        ):
+            self.mirror.keyboard_to_app()
+        return super().eventFilter(watched, event)
 
     # -- tray --------------------------------------------------------------
 

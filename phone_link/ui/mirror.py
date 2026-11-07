@@ -249,6 +249,10 @@ class MirrorPanel(QWidget):
         self._float_kind = ""
         # The MP4 being written by the visible scrcpy session, if any.
         self._recording_path = ""
+        # A recording restart re-opens the floating window, which the window
+        # manager then focuses; the toggle came from this window, so take it
+        # back once the floating window is up.
+        self._refocus_after_float = False
         self._capture: ScreenshotCapture | None = None
         self._last_snapshot: PhoneSnapshot | None = None
         # A rotation command takes a moment to reach the phone.  Do not let an
@@ -632,6 +636,7 @@ class MirrorPanel(QWidget):
         if self._floating and self._serial is not None:
             dex = self._float_kind == "dex"
             width, height = (1280, 720) if dex else (420, 900)
+            self._refocus_after_float = True
             self._float_session.start(
                 self._serial,
                 0,
@@ -876,6 +881,12 @@ class MirrorPanel(QWidget):
 
     def _on_float_status(self, state: str, detail: str) -> None:
         if state == "floating":
+            if self._refocus_after_float:
+                self._refocus_after_float = False
+                window = self.window()
+                if window is not None:
+                    window.raise_()
+                    window.activateWindow()
             return
         if state not in ("failed", "stopped"):
             return
@@ -1063,6 +1074,13 @@ class MirrorPanel(QWidget):
         if self._embedded:
             self._session.focus()
 
+    def keyboard_to_app(self) -> None:
+        """Move keyboard focus back to the app window after a click on its UI."""
+
+        window = self.window()
+        if window is not None:
+            self._session.focus_app(int(window.winId()))
+
     def show_placeholder(
         self,
         title: str,
@@ -1098,7 +1116,6 @@ class MirrorPanel(QWidget):
         self.input_hint.setText("DeX floating" if self._floating else "Input passes through")
         self._session.set_geometry(self.stage.host.width(), self.stage.host.height())
         self._repaint_timer.start()
-        self._session.focus()
 
     def _on_status(self, state: str, detail: str) -> None:
         self._last_state = state
