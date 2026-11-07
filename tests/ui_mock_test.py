@@ -28,6 +28,7 @@ OFFLINE = Path("/tmp/phone-link-fake-adb-offline")
 ROTATION_FILE = Path("/tmp/phone-link-fake-adb-rotation")
 SCRCPY_KEYS = Path("/tmp/phone-link-fake-scrcpy-keys.log")
 DROP_FILE = Path("/tmp/phone-link-drop-test.txt")
+CAPTURES = Path("/tmp/phone-link-test-captures")
 CONFIG_DIR = Path("/tmp/phone-link-test-config")
 DATA_DIR = Path("/tmp/phone-link-test-data")
 
@@ -37,6 +38,7 @@ os.environ["XDG_CONFIG_HOME"] = str(CONFIG_DIR)
 os.environ["XDG_DATA_HOME"] = str(DATA_DIR)
 shutil.rmtree(CONFIG_DIR, ignore_errors=True)
 shutil.rmtree(DATA_DIR, ignore_errors=True)
+shutil.rmtree(CAPTURES, ignore_errors=True)
 
 os.environ["PATH"] = f"{FAKES}:{os.environ.get('PATH', '')}"
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
@@ -76,6 +78,7 @@ def main() -> int:
         from PySide6.QtWidgets import QApplication
 
         sys.path.insert(0, str(BASE))
+        import phone_link.ui.main_window as main_window_module
         from phone_link.dependencies import check_dependencies
         from phone_link.ui.main_window import MainWindow
         from phone_link.ui.notifications import NotificationCard
@@ -94,7 +97,11 @@ def main() -> int:
             if not item.ok:
                 print("PROBLEM", item.key, item.detail)
 
+        # Keep recordings out of the real Videos folder during the test.
+        main_window_module.default_recording_folder = lambda: CAPTURES
+
         window = MainWindow(report)
+        window._photo_folder = CAPTURES
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         window.resize(1180, 860)
         window.show()
@@ -216,6 +223,21 @@ def main() -> int:
                 window.mirror._session._dex,
             )
 
+            # A DeX screenshot resolves the virtual display id scrcpy logged
+            # through dumpsys, then captures that display.
+            window.mirror.shot.click()
+            dex_shot = wait_until(
+                lambda: len(list(CAPTURES.glob("*.png"))) == 1, timeout=10.0
+            )
+            dex_png = next(CAPTURES.glob("*.png"), None)
+            print(
+                "SCREENSHOT_DEX",
+                dex_shot,
+                window.mirror._session.display_id,
+                dex_png is not None
+                and dex_png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n",
+            )
+
             # While DeX is embedded, the bottom navigation buttons must act on
             # the virtual display.  adb keyevents always target the phone's
             # main display, so the app sends scrcpy's own MOD+b shortcut.
@@ -284,6 +306,53 @@ def main() -> int:
                 popout.isVisible(),
             )
 
+            # The plain phone screenshot needs no display lookup.
+            window.mirror.shot.click()
+            phone_shot = wait_until(
+                lambda: len(list(CAPTURES.glob("*.png"))) == 2, timeout=10.0
+            )
+            print(
+                "SCREENSHOT_PHONE",
+                phone_shot,
+                len(list(CAPTURES.glob("*.png"))),
+            )
+
+            # Recording restarts the visible session with --record and stops
+            # into an MP4 when toggled off.
+            record = window.mirror.record
+            record.click()
+            record_on = wait_until(
+                lambda: window.mirror.is_recording
+                and record.isChecked()
+                and window.mirror.is_mirroring
+                and bool(window.mirror._session.record_path),
+                timeout=25.0,
+            )
+            mp4 = next(CAPTURES.glob("*.mp4"), None)
+            print(
+                "RECORD_ON",
+                record_on,
+                window.mirror.is_recording,
+                bool(window.mirror._session.record_path),
+                mp4 is not None
+                and mp4.read_bytes()[:12] == b"\x00\x00\x00\x18ftypmp42",
+            )
+            record.click()
+            record_off = wait_until(
+                lambda: not window.mirror.is_recording
+                and not record.isChecked()
+                and window.mirror.is_mirroring
+                and not window.mirror._session.record_path,
+                timeout=25.0,
+            )
+            print(
+                "RECORD_OFF",
+                record_off,
+                window.mirror.is_recording,
+                record.isChecked(),
+                window.mirror.is_mirroring,
+            )
+
             # With DeX off, Pop out must move the phone screen itself into the
             # floating window and leave the frame free.
             popout.click()
@@ -303,6 +372,43 @@ def main() -> int:
                 popout.text(),
                 popout.isChecked(),
                 popout.isEnabled(),
+            )
+
+            # The capture controls follow the popped-out phone: screenshots
+            # still reach its display and recording attaches to the floating
+            # scrcpy session.
+            shots_before = len(list(CAPTURES.glob("*.png")))
+            window.mirror.shot.click()
+            float_shot = wait_until(
+                lambda: len(list(CAPTURES.glob("*.png"))) == shots_before + 1,
+                timeout=10.0,
+            )
+            record.click()
+            float_record_on = wait_until(
+                lambda: window.mirror.is_recording
+                and window.mirror._float_session.is_running
+                and bool(window.mirror._float_session.record_path),
+                timeout=25.0,
+            )
+            print(
+                "CAPTURE_FLOAT",
+                float_shot,
+                window.mirror._float_kind,
+                float_record_on,
+                bool(window.mirror._float_session.record_path),
+            )
+            record.click()
+            float_record_off = wait_until(
+                lambda: not window.mirror.is_recording
+                and window.mirror._float_session.is_running
+                and not window.mirror._float_session.record_path,
+                timeout=25.0,
+            )
+            print(
+                "CAPTURE_FLOAT_OFF",
+                float_record_off,
+                window.mirror.is_recording,
+                record.isChecked(),
             )
 
             popout.click()

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import sys
 from datetime import datetime
@@ -19,6 +20,28 @@ DEVICES = f"""List of devices attached
 SERVICES = """List of discovered mdns services
 adb-MOCK123-a._adb-tls-pairing._tcp.\t192.168.1.50:37123
 adb-MOCK123-a._adb-tls-connect._tcp.\t192.168.1.50:37777
+"""
+
+# A valid 1x1 PNG, so screenshot tests exercise the real byte path.
+PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+DISPLAY_DUMP = """Logical Displays: size=2
+  Display 0:
+    mDisplayId=0
+    mPrimaryDisplayDevice=Built-in Screen(local:1234567890)
+    mIsEnabled=true
+    mBaseDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2340, type INTERNAL, uniqueId "local:1234567890", app 1080 x 2340}
+  Display 114:
+    mDisplayId=114
+    mPrimaryDisplayDevice=scrcpy(virtual:com.android.shell,2000,scrcpy,107)
+    mIsEnabled=true
+    mBaseDisplayInfo=DisplayInfo{"scrcpy", displayId 114, real 1920 x 1080, type VIRTUAL, uniqueId "virtual:com.android.shell,2000,scrcpy,107", app 1920 x 1080}
+"""
+
+SURFACE_DISPLAY_DUMP = """Display 1234567890 (HWC display 0): port=195 pnpId=SAM displayName="screen"
+Display 11529215047395875271 (Virtual display): displayName="scrcpy" uniqueId="virtual:com.android.shell,2000,scrcpy,107"
 """
 
 def rotation() -> int:
@@ -102,6 +125,18 @@ def main() -> int:
                     device_id = rest[index + 1]
             log(f"broadcast {device_id}")
             sys.stdout.write("Broadcast completed: result=0\n")
+            return 0
+        if rest[:2] == ["shell", "dumpsys"]:
+            command = rest[2] if len(rest) > 2 else ""
+            if command == "display":
+                sys.stdout.write(DISPLAY_DUMP)
+                return 0
+            if command == "SurfaceFlinger":
+                sys.stdout.write(SURFACE_DISPLAY_DUMP)
+                return 0
+        if rest[:2] == ["exec-out", "screencap"]:
+            log("screencap")
+            sys.stdout.buffer.write(PNG_BYTES)
             return 0
         if rest and rest[0] == "shell":
             sys.stdout.write(shell_info())

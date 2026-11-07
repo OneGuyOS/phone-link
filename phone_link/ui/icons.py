@@ -192,6 +192,19 @@ def glyph_pixmap(name: str, color: str, size: int = 20) -> QPixmap:
         p.drawRoundedRect(QRectF(3.2, 4.8, 17.6, 11.8), 1.8, 1.8)
         p.drawLine(QPointF(12.0, 16.6), QPointF(12.0, 20.0))
         p.drawLine(QPointF(8.4, 20.0), QPointF(15.6, 20.0))
+    elif name == "camera":
+        p.drawRoundedRect(QRectF(3.2, 6.8, 17.6, 12.4), 2.2, 2.2)
+        path = QPainterPath()
+        path.moveTo(8.4, 6.8)
+        path.lineTo(9.8, 4.6)
+        path.lineTo(14.2, 4.6)
+        path.lineTo(15.6, 6.8)
+        p.drawPath(path)
+        p.drawEllipse(QPointF(12.0, 13.0), 3.1, 3.1)
+    elif name == "record":
+        p.setBrush(QColor(color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(12.0, 12.0), 5.4, 5.4)
     elif name == "wifi":
         path = QPainterPath()
         path.arcMoveTo(QRectF(4.0, 6.0, 16.0, 11.0), 55)

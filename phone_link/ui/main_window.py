@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from ..adb import AdbMonitor
 from ..autostart import is_enabled as autostart_enabled
+from ..capture import default_recording_folder
 from ..autostart import set_enabled as set_autostart
 from ..clipboard_sync import ClipboardSyncGate
 from ..dependencies import DependencyReport
@@ -143,6 +144,8 @@ class MainWindow(QMainWindow):
         self.mirror.retryRequested.connect(self._retry_mirror)
         self.mirror.rotationFailed.connect(self._flash)
         self.mirror.notice.connect(self._flash)
+        self.mirror.screenshotRequested.connect(self._take_screenshot)
+        self.mirror.recordRequested.connect(self._toggle_recording)
         left_layout.addWidget(self.mirror, 1)
 
         self.media = MediaBar(left_column)
@@ -361,6 +364,8 @@ class MainWindow(QMainWindow):
             ("Ctrl+Shift+R", self._rotate_screen),
             ("Ctrl+Shift+D", self._toggle_desktop),
             ("Ctrl+Shift+P", self._toggle_popout),
+            ("Ctrl+Shift+S", self._take_screenshot),
+            ("Ctrl+Shift+V", self._toggle_recording),
             ("Ctrl+F", self._focus_search),
             ("Ctrl+Shift+M", lambda: self._show_right_tab(1)),
             ("Ctrl+Shift+A", self._toggle_right_tab),
@@ -412,6 +417,12 @@ class MainWindow(QMainWindow):
             self._flash("Connect the phone before popping out the mirror.")
             return
         self.mirror.toggle_popout()
+
+    def _take_screenshot(self) -> None:
+        self.mirror.take_screenshot(self._photo_folder)
+
+    def _toggle_recording(self) -> None:
+        self.mirror.toggle_recording(default_recording_folder())
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():

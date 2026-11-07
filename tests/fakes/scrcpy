@@ -193,7 +193,28 @@ class FakePhoneScreen(QWidget):
         p.end()
 
 
+def announce_displays() -> None:
+    """Mimic the scrcpy log lines the app parses for screenshots/recordings."""
+
+    if any(arg.startswith("--new-display=") for arg in sys.argv):
+        sys.stdout.write("INFO: New display: 1920x1080/240 (id=114)\n")
+        sys.stdout.flush()
+    for arg in sys.argv:
+        if not arg.startswith("--record="):
+            continue
+        path = arg.split("=", 1)[1]
+        if not path:
+            continue
+        try:
+            with open(path, "wb") as handle:
+                # An MP4 file-type box, so tests can tell a recording started.
+                handle.write(b"\x00\x00\x00\x18ftypmp42")
+        except OSError:
+            pass
+
+
 def main() -> int:
+    announce_displays()
     app = QApplication(sys.argv)
     window = FakePhoneScreen()
     window.show()

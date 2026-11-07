@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QElapsedTimer, QEvent, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..capture import ScreenshotCapture, timestamped_name, unique_path
 from ..models import PhoneSnapshot
 from ..scrcpy import ScrcpySession
 from .icons import empty_state_pixmap, glyph_icon, glyph_pixmap
@@ -216,6 +219,8 @@ class MirrorPanel(QWidget):
     retryRequested = Signal()
     rotationFailed = Signal(str)
     notice = Signal(str)
+    screenshotRequested = Signal()
+    recordRequested = Signal()
 
     def __init__(
         self,
@@ -224,6 +229,7 @@ class MirrorPanel(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._adb_path = adb_path
         self._session = ScrcpySession(scrcpy_path, adb_path, self)
         # A second scrcpy process holds the DeX virtual display when it is
         # popped out.  The main session keeps mirroring the phone screen, so
@@ -241,6 +247,9 @@ class MirrorPanel(QWidget):
         self._floating = False
         # Which view the floating window carries: "dex", "phone" or "".
         self._float_kind = ""
+        # The MP4 being written by the visible scrcpy session, if any.
+        self._recording_path = ""
+        self._capture: ScreenshotCapture | None = None
         self._last_snapshot: PhoneSnapshot | None = None
         # A rotation command takes a moment to reach the phone.  Do not let an
         # in-flight poll snap the frame back to the old orientation.
@@ -321,6 +330,27 @@ class MirrorPanel(QWidget):
         self.speaker.clicked.connect(self._on_speaker_clicked)
         self._update_speaker()
         strip.addWidget(self.speaker)
+
+        self.shot = QToolButton(self)
+        self.shot.setObjectName("ScreenshotButton")
+        self.shot.setIcon(glyph_icon("camera", MUTED, 16))
+        self.shot.setIconSize(QSize(16, 16))
+        self.shot.setToolTip("Save a screenshot of the phone screen (Ctrl+Shift+S)")
+        self.shot.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.shot.clicked.connect(self._on_screenshot_clicked)
+        self.shot.setEnabled(False)
+        strip.addWidget(self.shot)
+
+        self.record = QToolButton(self)
+        self.record.setObjectName("RecordButton")
+        self.record.setIcon(glyph_icon("record", MUTED, 16))
+        self.record.setIconSize(QSize(16, 16))
+        self.record.setCheckable(True)
+        self.record.setToolTip("Record the phone screen to a video (Ctrl+Shift+V)")
+        self.record.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.record.clicked.connect(self._on_record_clicked)
+        self.record.setEnabled(False)
+        strip.addWidget(self.record)
         strip.addStretch(1)
         self.input_hint = QLabel("", self)
         self.input_hint.setObjectName("Dim")
@@ -462,6 +492,9 @@ class MirrorPanel(QWidget):
         self._settings.setValue("mirror/audio", self._audio)
         self._settings.sync()
         self._update_speaker()
+        # Every audio change restarts the visible session, so end a recording
+        # first and let the MP4 finalize instead of losing it in the restart.
+        self._finish_recording()
         if self._phone_floating and self._serial is not None:
             # The floating window owns the audio, so it has to restart too.
             self._start_phone_float()
@@ -472,6 +505,159 @@ class MirrorPanel(QWidget):
             and (self._embedded or self._last_state in ("starting", "failed"))
         ):
             self.start(self._last_snapshot, force=True)
+
+    @property
+    def is_recording(self) -> bool:
+        return bool(self._recording_path)
+
+    def _visible_session(self) -> ScrcpySession | None:
+        """The scrcpy session whose display the frame (or float) shows."""
+
+        if self._floating:
+            return self._float_session if self._float_session.is_running else None
+        return self._session if self._session.is_running else None
+
+    def _visible_display_id(self) -> int | None:
+        session = self._visible_session()
+        return session.display_id if session is not None else None
+
+    def _on_screenshot_clicked(self, _checked: bool = False) -> None:
+        self.screenshotRequested.emit()
+
+    def _on_record_clicked(self, _checked: bool = False) -> None:
+        self.recordRequested.emit()
+        # The main window starts or stops the recording; keep the button in
+        # step with what actually happened.
+        self._update_record_button()
+
+    def take_screenshot(self, folder: str | Path) -> bool:
+        """Save a PNG of whatever the frame (or the floating window) shows."""
+
+        if self._serial is None:
+            self.notice.emit("Connect the phone before taking a screenshot.")
+            return False
+        display_id = self._visible_display_id() if self._dex else None
+        if self._dex and display_id is None:
+            self.notice.emit("The DeX display is not ready yet. Try again in a moment.")
+            return False
+        if self._capture is not None:
+            self._capture.stop()
+            self._capture = None
+        capture = ScreenshotCapture(
+            self._adb_path, self._serial, Path(folder), display_id, self
+        )
+        capture.saved.connect(
+            lambda path, c=capture: self._on_screenshot_saved(path, c)
+        )
+        capture.failed.connect(
+            lambda message, c=capture: self._on_screenshot_failed(message, c)
+        )
+        self._capture = capture
+        capture.start()
+        return True
+
+    def _on_screenshot_saved(self, path: str, capture: ScreenshotCapture) -> None:
+        if capture is self._capture:
+            self._capture = None
+        capture.deleteLater()
+        self.notice.emit(f"Screenshot saved to {path}")
+
+    def _on_screenshot_failed(self, message: str, capture: ScreenshotCapture) -> None:
+        if capture is self._capture:
+            self._capture = None
+        capture.deleteLater()
+        self.notice.emit(message)
+
+    def toggle_recording(self, folder: str | Path) -> bool:
+        """Start recording the visible view, or stop the recording in progress."""
+
+        if self._recording_path:
+            self._stop_recording()
+            return True
+        return self._start_recording(folder)
+
+    def _start_recording(self, folder: str | Path) -> bool:
+        if self._serial is None:
+            self.notice.emit("Connect the phone before recording.")
+            return False
+        if self._visible_session() is None:
+            self.notice.emit("Wait for the mirror to come up before recording.")
+            return False
+        folder = Path(folder)
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.notice.emit(f"Could not create {folder}: {exc}")
+            return False
+        path = unique_path(folder, timestamped_name(suffix=".mp4"))
+        self._recording_path = str(path)
+        # scrcpy only records from the start of a session, so the visible
+        # session restarts with --record.  Stopping it later finalizes the MP4.
+        self._restart_visible_session()
+        self._update_record_button()
+        self.notice.emit(
+            f"Recording the {'DeX desktop' if self._dex else 'phone screen'} to {path}"
+        )
+        return True
+
+    def _stop_recording(self) -> None:
+        path = self._recording_path
+        if not path:
+            return
+        self._recording_path = ""
+        self._update_record_button()
+        if self._serial is not None and self._visible_session() is not None:
+            # Restarting without --record stops scrcpy, which writes the MP4's
+            # final index.
+            self._restart_visible_session()
+        self.notice.emit(f"Recording finished: {path}")
+
+    def _finish_recording(self) -> str:
+        """End an in-progress recording because the view is about to change.
+
+        The caller is about to stop or restart the visible session, and that
+        stop is what finalizes the MP4.
+        """
+
+        path = self._recording_path
+        if not path:
+            return ""
+        self._recording_path = ""
+        self._update_record_button()
+        self.notice.emit(f"Recording finished: {path}")
+        return path
+
+    def _restart_visible_session(self) -> None:
+        record = self._recording_path or None
+        if self._floating and self._serial is not None:
+            dex = self._float_kind == "dex"
+            width, height = (1280, 720) if dex else (420, 900)
+            self._float_session.start(
+                self._serial,
+                0,
+                width,
+                height,
+                audio=self._audio,
+                dex=dex,
+                floating=True,
+                record_path=record,
+            )
+            return
+        if self._last_snapshot is not None:
+            self.start(self._last_snapshot, force=True)
+
+    def _update_record_button(self) -> None:
+        recording = bool(self._recording_path)
+        self.record.setChecked(recording)
+        self.record.setIcon(glyph_icon("record", DANGER if recording else MUTED, 16))
+        self.record.setToolTip(
+            "Stop and save the recording (Ctrl+Shift+V)"
+            if recording
+            else "Record the phone screen to a video (Ctrl+Shift+V)"
+        )
+        self.record.setEnabled(
+            self._serial is not None and (self._embedded or self._floating or recording)
+        )
 
     def _set_rotate_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled) and not self._shows_desktop
@@ -484,6 +670,8 @@ class MirrorPanel(QWidget):
         # Dock stays available even if the phone drops, so the frame can
         # always be restored.
         self.popout.setEnabled(enabled or self._floating)
+        self.shot.setEnabled(enabled)
+        self._update_record_button()
 
     def _update_dex_ui(self) -> None:
         self.desktop.setChecked(self._dex)
@@ -539,6 +727,7 @@ class MirrorPanel(QWidget):
         enabled = bool(enabled)
         if enabled == self._dex:
             return
+        self._finish_recording()
         # Whichever view floats owns the frame's content; dock it before the
         # frame switches to the other mode.
         if self._floating:
@@ -580,6 +769,9 @@ class MirrorPanel(QWidget):
     def pop_out(self) -> None:
         if self._floating or self._serial is None:
             return
+        # Popping out restarts the visible sessions, which would cut a
+        # recording short; save it first.
+        self._finish_recording()
         dex = self._dex
         self._floating = True
         self._float_kind = "dex" if dex else "phone"
@@ -664,6 +856,7 @@ class MirrorPanel(QWidget):
     def dock(self) -> None:
         if not self._floating:
             return
+        self._finish_recording()
         kind = self._float_kind
         self._stop_floating()
         self._update_dex_ui()
@@ -688,6 +881,7 @@ class MirrorPanel(QWidget):
             return
         if not self._floating:
             return
+        self._finish_recording()
         kind = self._float_kind
         was_dex = kind == "dex"
         self._floating = False
@@ -743,6 +937,10 @@ class MirrorPanel(QWidget):
             self._maybe_start_pending()
             return
         same_device = self._serial == device.serial
+        if not same_device:
+            # A different device means a fresh session; the old MP4 cannot
+            # keep recording into the new one.
+            self._finish_recording()
         self._serial = device.serial
         self._device_name = name
         if not same_device:
@@ -809,9 +1007,11 @@ class MirrorPanel(QWidget):
             max(frame.height() - 14, min_height),
             audio=in_app_mirror_audio(self._audio, self._floating),
             dex=self._shows_desktop,
+            record_path=self._recording_path or None,
         )
 
     def restart(self) -> None:
+        self._finish_recording()
         self._pending_snapshot = None
         self._start_timer.stop()
         self._stop_floating()
@@ -823,6 +1023,7 @@ class MirrorPanel(QWidget):
         self.retryRequested.emit()
 
     def stop_for_disconnect(self) -> None:
+        self._finish_recording()
         self._pending_snapshot = None
         self._start_timer.stop()
         if self._serial is not None or self._embedded:
@@ -848,6 +1049,10 @@ class MirrorPanel(QWidget):
         self._start_timer.stop()
         self._session.stop(block=True, silent=True)
         self._float_session.stop(block=True, silent=True)
+        if self._capture is not None:
+            self._capture.stop()
+            self._capture = None
+        self._recording_path = ""
         self._serial = None
         self._embedded = False
         self._floating = False
@@ -903,6 +1108,10 @@ class MirrorPanel(QWidget):
             return
         if state == "embedded":
             return
+        if state in ("failed", "stopped"):
+            # The process that was writing the MP4 is gone, so the recording
+            # has ended whether or not the user asked for it.
+            self._finish_recording()
         self._embedded = False
         self.nav.set_enabled(False)
         self._set_rotate_enabled(False)

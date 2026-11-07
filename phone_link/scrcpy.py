@@ -20,6 +20,10 @@ from .x11 import X11Display, X11Error
 # (DeX) the full launcher, taskbar and window decorations.
 DEX_DISPLAY = "1920x1080/240"
 
+# scrcpy reports the display it created, e.g.
+#   INFO: New display: 1920x1080/240 (id=114)
+NEW_DISPLAY_RE = re.compile(r"New display: .*\(id=(\d+)\)")
+
 
 class ScrcpySession(QObject):
     """One scrcpy process tied to one Qt container window."""
@@ -48,6 +52,7 @@ class ScrcpySession(QObject):
         self._dex = False
         self._floating = False
         self._floating_live = False
+        self._record_path = ""
         self._log_tail = ""
         self._stopping = False
         self._suppress_stopped = False
@@ -85,6 +90,23 @@ class ScrcpySession(QObject):
     def is_running(self) -> bool:
         return self._process is not None and self._process.state() != QProcess.ProcessState.NotRunning
 
+    @property
+    def record_path(self) -> str:
+        return self._record_path
+
+    @property
+    def display_id(self) -> int | None:
+        """The Android display this session shows, if scrcpy created one.
+
+        Only DeX uses a virtual display; scrcpy logs its id once the display
+        exists, which is what a screenshot of the desktop needs.
+        """
+
+        matches = NEW_DISPLAY_RE.findall(self._log_tail)
+        if not matches:
+            return None
+        return int(matches[-1])
+
     def start(
         self,
         serial: str,
@@ -94,6 +116,7 @@ class ScrcpySession(QObject):
         audio: bool | None = None,
         dex: bool = False,
         floating: bool = False,
+        record_path: str | None = None,
     ) -> None:
         self.stop(silent=True)
         if audio is not None:
@@ -109,6 +132,7 @@ class ScrcpySession(QObject):
         self._dex = bool(dex)
         self._floating = bool(floating)
         self._floating_live = False
+        self._record_path = str(record_path or "")
         self._log_tail = ""
 
         if not self.scrcpy_path:
@@ -156,6 +180,7 @@ class ScrcpySession(QObject):
             dex=self._dex,
             floating=self._floating,
             audio=self._audio,
+            record=self._record_path or None,
         )
         self._elapsed.start()
         self._stopping = False
@@ -384,6 +409,7 @@ def build_scrcpy_args(
     dex: bool = False,
     floating: bool = False,
     audio: bool = False,
+    record: str | None = None,
 ) -> list[str]:
     """Build the scrcpy command line for one mirror or DeX window."""
 
@@ -425,6 +451,11 @@ def build_scrcpy_args(
         args.append("--window-borderless")
     if not audio:
         args.append("--no-audio")
+    if record:
+        # scrcpy only records from the start of a session, so the panel
+        # restarts the visible session with this flag to begin, and restarts
+        # it again without the flag to stop and finalize the MP4.
+        args.append(f"--record={record}")
     # Audio keeps scrcpy's 50 ms default buffer: USB and the router's 5 GHz
     # band both carry the stream without loss, so the tighter A/V sync wins.
     return args

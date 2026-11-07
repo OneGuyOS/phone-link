@@ -17,6 +17,14 @@ Windows Phone Link. One window contains:
   or pop DeX out while the normal phone mirror stays in the frame. **Dock**
   brings it back. While the phone itself is popped out, the frame stops its
   own stream, so the same screen is never encoded twice.
+- **Screenshot:** the camera button in the mirror strip (or `Ctrl+Shift+S`)
+  saves a PNG of whatever is on screen — the phone, DeX, or the popped-out
+  window — to the camera-photo folder (`~/Pictures/Phone Link` by default).
+  DeX screenshots resolve scrcpy's virtual display over ADB.
+- **Record:** the record button (or `Ctrl+Shift+V`) records the visible view to
+  an MP4 in `~/Videos/Phone Link`; click it again to stop and save. scrcpy only
+  records from the start of a session, so starting or stopping briefly restarts
+  the mirror.
 - **DeX:** the **DeX** button switches the frame to Samsung's desktop mode on a
   1080p virtual display, with the full launcher, taskbar and windows. The last
   mode is remembered.
@@ -143,6 +151,8 @@ The status bar mentions them at startup, and **F1** opens the in-app list.
 | `Ctrl+Shift+R` | Rotate the mirrored phone screen |
 | `Ctrl+Shift+D` | Switch the mirror between the phone screen and DeX |
 | `Ctrl+Shift+P` | Pop the mirror or DeX out into its own window, or dock it |
+| `Ctrl+Shift+S` | Save a screenshot of the phone screen |
+| `Ctrl+Shift+V` | Start or stop recording the phone screen to a video |
 | `Ctrl+F` | Focus the notification search box |
 | `Ctrl+Shift+M` | Open the Messages tab |
 | `Ctrl+Shift+A` | Switch between the notifications and agent tabs |
@@ -746,10 +756,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   edge and clip its border and dismiss button.
 - Window state: closing the mock window wrote its geometry to the isolated test
   settings (`GEOMETRY_SAVED True`).
-- Shortcuts: all twelve window shortcuts were registered (`F5`, `Ctrl+R`,
-  `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+F`, `Ctrl+Shift+M`,
-  `Ctrl+Shift+A`, `F11`, `F1`, `Ctrl+Q`, `Ctrl+W`), and the shortcut dialog
-  rendered with all twelve entries offscreen.
+- Shortcuts: all fourteen window shortcuts were registered (`F5`, `Ctrl+R`,
+  `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+Shift+S`,
+  `Ctrl+Shift+V`, `Ctrl+F`, `Ctrl+Shift+M`, `Ctrl+Shift+A`, `F11`, `F1`,
+  `Ctrl+Q`, `Ctrl+W`), and the shortcut dialog rendered with all fourteen
+  entries offscreen.
 - DeX: the mock run switched the frame to a 16:9 desktop, showed the Pop out
   button, popped DeX into a second fake scrcpy process while the main mirror
   stayed embedded, docked it again, and switched back to the phone frame. The
@@ -765,6 +776,12 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   window, opened a decorated 420×900 `Phone Link - phone` window, and brought
   the embedded mirror back on Dock; closing the floating window also docked it
   automatically.
+- Capture: the mock run saved PNGs for the phone, for DeX (resolving scrcpy's
+  virtual display 114 through `dumpsys display` and `dumpsys SurfaceFlinger
+  --display-id`), and for the popped-out phone; the record toggle restarted the
+  visible session with `--record`, wrote an MP4, and stopped cleanly. On the
+  real phone the ADB chain produced a 1920×1080 DeX screenshot and a 1080×2340
+  phone screenshot.
 - Error states: a simulated KDE Connect offline snapshot showed the
   **KDE Connect is offline** empty state with a visible **Try again** button
   wired to a full refresh.
@@ -846,7 +863,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 228 unit tests covering ADB parsing and selection, name/battery parsing,
+- 247 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, automatic wireless reconnection (same host, changed port, other
@@ -1039,6 +1056,16 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 - **Pop out** works for the phone screen too: the frame stops its own mirror
   while a second scrcpy process shows the phone in a decorated window, and
   **Dock** (or closing that window) brings the stream back into the frame.
+- **Screenshots** capture the display the frame or floating window shows. The
+  phone screen comes from `adb exec-out screencap`; DeX uses the SurfaceFlinger
+  display token of scrcpy's virtual display, which is looked up through
+  `dumpsys` each time. Screenshots go to the camera-photo folder, so **Choose
+  photo folder…** moves both camera imports and screenshots.
+- **Recording** uses scrcpy's own `--record`, which can only start a session.
+  Starting or stopping a recording therefore restarts the visible mirror, and
+  changing DeX, Pop out, Dock, or the speaker ends a recording first so the MP4
+  is finalized instead of lost. Recording stops when the phone disconnects;
+  files go to `~/Videos/Phone Link`.
 - The phone frame follows the display rotation the phone reports, checked with
   the other ADB state every 2.5 seconds. After **Rotate** is pressed the frame
   switches immediately and holds that orientation for 2.2 seconds so an
@@ -1292,6 +1319,8 @@ folder or a browser link.
   slider.
 
 No phone-screen frames, video, audio or notification content leave the machine.
+Screenshots and recordings are written only to the local folders described
+above.
 Notification history is written only to the local owner-only file described
 above. Clipboard text goes only to the paired phone through KDE Connect, either
 when the clipboard button is pressed or while the optional auto-sync toggle is
@@ -1314,6 +1343,7 @@ built-in providers and is not written to disk.
 phone_link/          application code
   agent.py           agent backends (HTTP streaming, CLI agents, provider store)
   autostart.py       per-user XDG autostart entry
+  capture.py         phone and DeX screenshots over ADB
   chat_store.py      the saved agent transcript
   local_server.py    finds and starts the local llama.cpp model
   phone_context.py   the read-only phone snapshot for the agent
