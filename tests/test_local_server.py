@@ -46,6 +46,17 @@ class DetectTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {MODEL_ENV: str(model)}):
                 self.assertEqual(find_model(), str(model))
 
+    def test_phone_model_is_preferred_over_other_models(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            models = Path(folder)
+            (models / "OLMoE-1B-7B-Q4.gguf").write_bytes(b"GGUF")
+            (models / "Qwen3.5-4B-Q4_K_M.gguf").write_bytes(b"GGUF")
+            with mock.patch.dict(os.environ, {MODEL_ENV: ""}):
+                with mock.patch.object(
+                    local_server, "default_model_dirs", return_value=[models]
+                ):
+                    self.assertTrue(find_model().endswith("Qwen3.5-4B-Q4_K_M.gguf"))
+
     def test_missing_configured_model_is_reported_as_missing(self) -> None:
         with mock.patch.dict(
             os.environ, {MODEL_ENV: "/nonexistent/model.gguf"}
@@ -71,6 +82,10 @@ class ArgumentTests(unittest.TestCase):
         self.assertEqual(args[args.index("--threads") + 1], "3")
         self.assertEqual(args[args.index("--alias") + 1], "zara-fast")
         self.assertIn("--jinja", args)
+        self.assertEqual(
+            args[args.index("--chat-template-kwargs") + 1],
+            '{"enable_thinking":false}',
+        )
         self.assertNotIn("0.0.0.0", args)
 
     def test_default_threads_is_sane(self) -> None:

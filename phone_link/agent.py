@@ -32,7 +32,28 @@ from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signa
 DEFAULT_SYSTEM_PROMPT = (
     "You are the assistant built into Phone Link, a KDE desktop companion for "
     "an Android phone. Be concise and practical. You do not automatically see "
-    "the phone's state; ask for or use details the user provides."
+    "the phone's state; ask for or use details the user provides.\n"
+    "\n"
+    "To save a file on the user's computer, put its content in a fenced code "
+    "block whose info string is file:NAME, for example:\n"
+    "\n"
+    "```file:notes.md\n"
+    "# Notes\n"
+    "...\n"
+    "```\n"
+    "\n"
+    "Use a plain filename with an extension and no folder. Phone Link saves "
+    "the block to its files folder and reports the full path; the rest of the "
+    "reply is chat text. Write files only when the user asks for one."
+)
+
+# Installs that already ran this app stored the per-provider copy of the old
+# default.  Treat that exact text as "unedited" so everyone picks up the file
+# convention instead of keeping it forever.
+_LEGACY_SYSTEM_PROMPTS = (
+    "You are the assistant built into Phone Link, a KDE desktop companion for "
+    "an Android phone. Be concise and practical. You do not automatically see "
+    "the phone's state; ask for or use details the user provides.",
 )
 
 
@@ -197,6 +218,8 @@ def load_store(path: Path | None = None) -> AgentStore:
                 # name in single-model mode, so this also works for a server
                 # started without an alias.
                 provider.model = PRESET_BY_ID["phone"].model
+            if provider.system_prompt.strip() in _LEGACY_SYSTEM_PROMPTS:
+                provider.system_prompt = DEFAULT_SYSTEM_PROMPT
             if provider.id in PRESET_BY_ID:
                 merged[provider.id] = provider
             elif bool(item.get("builtin")):
@@ -247,6 +270,116 @@ def provider_key(provider: Provider) -> str:
     """The API key stored for a custom provider, if any."""
 
     return provider.api_key.strip()
+
+
+# --------------------------------------------------------------------------
+# Files the assistant writes
+#
+# A chat-completions model cannot touch the disk, so the app recognises a
+# small convention instead: a fenced block whose info string is ``file:NAME``.
+# The block is written to one predictable folder, which keeps the model's
+# reach limited to files the user asked for.
+
+FILES_ENV = "PHONE_LINK_FILES"
+MAX_SAVED_FILES = 5
+MAX_SAVED_BYTES = 1_000_000
+
+_FILE_BLOCK = re.compile(
+    r"```[ \t]*file:[ \t]*([^\n`]+?)[ \t]*\n(.*?)```",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+@dataclass
+class SavedFile:
+    """One ``file:`` block from a reply, written or rejected."""
+
+    name: str
+    path: Path | None = None
+    error: str = ""
+
+
+def agent_files_dir() -> Path:
+    """Where the assistant saves files; override with ``PHONE_LINK_FILES``."""
+
+    configured = os.environ.get(FILES_ENV, "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / "Documents" / "Phone Link"
+
+
+def _safe_file_name(name: str) -> str:
+    """A bare filename that cannot escape the files folder."""
+
+    clean = name.strip()
+    if not clean:
+        return ""
+    if len(clean) > 120:
+        return ""
+    if clean in (".", "..") or clean.startswith("."):
+        return ""
+    if "/" in clean or "\\" in clean:
+        return ""
+    if any(ord(character) < 32 for character in clean):
+        return ""
+    if Path(clean).name != clean:
+        return ""
+    return clean
+
+
+def parse_file_blocks(text: str) -> list[tuple[str, str]]:
+    """The (name, content) pairs in a reply's ``file:`` blocks."""
+
+    blocks: list[tuple[str, str]] = []
+    for match in _FILE_BLOCK.finditer(text):
+        name = _safe_file_name(match.group(1))
+        if not name:
+            continue
+        blocks.append((name, match.group(2)))
+        if len(blocks) >= MAX_SAVED_FILES:
+            break
+    return blocks
+
+
+def save_file_blocks(
+    text: str, folder: Path | None = None
+) -> list[SavedFile]:
+    """Write every usable ``file:`` block and report the outcome.
+
+    Failures are returned rather than raised so a bad filename cannot break
+    the chat.
+    """
+
+    destination = folder or agent_files_dir()
+    saved: list[SavedFile] = []
+    for match in _FILE_BLOCK.finditer(text):
+        if len(saved) >= MAX_SAVED_FILES:
+            break
+        raw_name = match.group(1).strip()
+        name = _safe_file_name(raw_name)
+        if not name:
+            saved.append(
+                SavedFile(raw_name or "(unnamed)", error="not a plain filename")
+            )
+            continue
+        content = match.group(2)
+        if len(content.encode("utf-8")) > MAX_SAVED_BYTES:
+            saved.append(
+                SavedFile(name, error=f"larger than {MAX_SAVED_BYTES} bytes")
+            )
+            continue
+        try:
+            destination.mkdir(parents=True, exist_ok=True)
+            path = destination / name
+            if path.is_symlink():
+                saved.append(SavedFile(name, error="a symlink is in the way"))
+                continue
+            path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            saved.append(SavedFile(name, error=str(exc)))
+            continue
+        saved.append(SavedFile(name, path=path))
+    return saved
 
 
 # --------------------------------------------------------------------------

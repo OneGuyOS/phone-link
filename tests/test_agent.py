@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import stat
 import tempfile
 import unittest
@@ -13,10 +14,13 @@ from types import SimpleNamespace
 from unittest import mock
 
 from phone_link.agent import (
+    DEFAULT_SYSTEM_PROMPT,
+    FILES_ENV,
     AgentStore,
     ChatMessage,
     Provider,
     adb_forward,
+    agent_files_dir,
     chat_url,
     chunk_text,
     claude_argv,
@@ -30,7 +34,9 @@ from phone_link.agent import (
     describe_http_error,
     load_store,
     models_url,
+    parse_file_blocks,
     provider_key,
+    save_file_blocks,
     save_store,
     sse_payloads,
 )
@@ -328,6 +334,33 @@ class StoreTests(unittest.TestCase):
             store = load_store(path)
             self.assertEqual(store.by_id("phone").model, "phone")
 
+    def test_legacy_default_prompt_picks_up_the_file_convention(self) -> None:
+        legacy = (
+            "You are the assistant built into Phone Link, a KDE desktop "
+            "companion for an Android phone. Be concise and practical. You do "
+            "not automatically see the phone's state; ask for or use details "
+            "the user provides."
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "agent.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "providers": [
+                            {
+                                "id": "zara-fast",
+                                "label": "Zara Fast",
+                                "system_prompt": legacy,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = load_store(path)
+            self.assertEqual(store.by_id("zara-fast").system_prompt, DEFAULT_SYSTEM_PROMPT)
+
     def test_broken_config_falls_back_to_presets(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"
@@ -338,6 +371,72 @@ class StoreTests(unittest.TestCase):
                 ["zara-fast", "phone"],
             )
             self.assertTrue(store.by_id("zara-fast").builtin)
+
+
+class SavedFileTests(unittest.TestCase):
+    def test_parse_reads_file_blocks_only(self) -> None:
+        text = (
+            "Here you go.\n"
+            "```file:notes.md\n"
+            "# Notes\n"
+            "body\n"
+            "```\n"
+            "And code:\n"
+            "```python\nprint('no')\n```\n"
+            "```file: todo.txt\nsecond\n```"
+        )
+        self.assertEqual(
+            parse_file_blocks(text),
+            [("notes.md", "# Notes\nbody\n"), ("todo.txt", "second\n")],
+        )
+
+    def test_parse_skips_names_that_could_escape_the_folder(self) -> None:
+        for name in ("../secret", "/etc/passwd", "sub/dir.txt", ".hidden", ".."):
+            text = f"```file:{name}\nonly content\n```"
+            self.assertEqual(parse_file_blocks(text), [], name)
+
+    def test_save_writes_text_and_reports_the_path(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "saved"
+            outcomes = save_file_blocks(
+                "```file:notes.md\nhello\n```", destination
+            )
+            self.assertEqual(len(outcomes), 1)
+            self.assertEqual(outcomes[0].name, "notes.md")
+            self.assertEqual(outcomes[0].error, "")
+            self.assertEqual(outcomes[0].path, destination / "notes.md")
+            self.assertEqual(
+                (destination / "notes.md").read_text(encoding="utf-8"), "hello\n"
+            )
+
+    def test_save_reports_a_bad_name_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            outcomes = save_file_blocks(
+                "```file:../escape.txt\nnope\n```", Path(folder)
+            )
+            self.assertEqual(len(outcomes), 1)
+            self.assertIsNone(outcomes[0].path)
+            self.assertIn("plain filename", outcomes[0].error)
+            self.assertEqual(list(Path(folder).iterdir()), [])
+
+    def test_save_refuses_an_oversized_file(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            text = "```file:big.txt\n" + "x" * (1_000_001) + "\n```"
+            outcomes = save_file_blocks(text, Path(folder))
+            self.assertEqual(len(outcomes), 1)
+            self.assertIn("larger than", outcomes[0].error)
+            self.assertFalse((Path(folder) / "big.txt").exists())
+
+    def test_files_folder_can_be_overridden(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch.dict(os.environ, {FILES_ENV: folder}):
+                self.assertEqual(agent_files_dir(), Path(folder))
+
+    def test_default_files_folder_is_in_documents(self) -> None:
+        with mock.patch.dict(os.environ, {FILES_ENV: ""}):
+            self.assertEqual(
+                agent_files_dir(), Path.home() / "Documents" / "Phone Link"
+            )
 
 
 class AdbForwardTests(unittest.TestCase):

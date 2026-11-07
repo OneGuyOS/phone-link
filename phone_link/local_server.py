@@ -10,7 +10,8 @@ The binary and model are found in this order:
 * ``$PHONE_LINK_LLAMA_SERVER`` and ``$PHONE_LINK_LOCAL_MODEL``;
 * ``llama-server`` on ``PATH``, plus the usual build directories;
 * a ``.gguf`` in ``$XDG_DATA_HOME/phone-link/models`` (or
-  ``~/.local/share/phone-link/models``), then in ``~/zara/models``.
+  ``~/.local/share/phone-link/models``), then in ``~/zara/models``.  A
+  Qwen3.5-4B file wins so the computer runs the same weights as the phone.
 
 Nothing here downloads a model or talks to a network service; the server is
 bound to ``127.0.0.1`` only.
@@ -83,7 +84,7 @@ def find_server() -> str | None:
 
 
 def find_model() -> str | None:
-    """The first usable GGUF model, preferring the configured one."""
+    """The first usable GGUF model, preferring the phone's small model."""
 
     configured = os.environ.get(MODEL_ENV, "").strip()
     if configured:
@@ -95,7 +96,10 @@ def find_model() -> str | None:
         models = sorted(directory.glob("*.gguf"))
         if not models:
             continue
-        preferred = [path for path in models if "olmoe" in path.name.lower()]
+        # Use the same weights as the phone's server when they are present,
+        # so both built-in providers answer with the same model.
+        preferred = [path for path in models if "qwen3.5-4b" in path.name.lower()]
+        preferred += [path for path in models if "olmoe" in path.name.lower()]
         return str((preferred or models)[0])
     return None
 
@@ -131,6 +135,8 @@ def server_argv(
         "--n-gpu-layers",
         "0",
         "--jinja",
+        "--chat-template-kwargs",
+        '{"enable_thinking":false}',
         "--alias",
         alias,
         "--threads",

@@ -5,7 +5,8 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -37,9 +38,11 @@ from ..agent import (
     ModelFetcher,
     Provider,
     adb_forward,
+    agent_files_dir,
     cli_executable,
     load_store,
     probe,
+    save_file_blocks,
     save_store,
 )
 from ..local_server import LocalServer
@@ -181,6 +184,11 @@ class AgentPanel(QWidget):
         self.new_button.setToolTip("Start a new chat")
         self.new_button.clicked.connect(self.new_chat)
         header.addWidget(self.new_button)
+        self.files_button = QPushButton("Files", self)
+        self.files_button.setObjectName("AgentIconButton")
+        self.files_button.setToolTip("Open the folder where the agent saves files")
+        self.files_button.clicked.connect(self._open_files)
+        header.addWidget(self.files_button)
         root.addLayout(header)
 
         self.status = QLabel("", self)
@@ -343,6 +351,15 @@ class AgentPanel(QWidget):
     def _focus_input(self) -> None:
         self.input.setFocus()
 
+    def _open_files(self) -> None:
+        folder = agent_files_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._add_bubble("error", f"Could not open the files folder: {exc}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
     def _local_provider(self, provider: Provider) -> bool:
         return provider.kind == "openai" and provider.id == "zara-fast" and (
             provider.base_url.startswith(
@@ -488,6 +505,17 @@ class AgentPanel(QWidget):
             self._bubble.append_text("\n\n[stopped]")
         if text.strip():
             self._messages.append(ChatMessage("assistant", text))
+            if not stopped and self._provider.kind == "openai":
+                for saved in save_file_blocks(text):
+                    if saved.error:
+                        self._bubble.add_tool(
+                            f"Could not save {saved.name}: {saved.error}"
+                        )
+                    elif saved.path is not None:
+                        self._bubble.add_tool(
+                            f"Saved {saved.name} → {saved.path}"
+                        )
+                self._scroll_later()
         self._bubble = None
         self.input.setFocus()
 

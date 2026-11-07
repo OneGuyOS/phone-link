@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
-from phone_link.agent import AgentStore, Provider
+from phone_link.agent import FILES_ENV, AgentStore, Provider
 from phone_link.ui import agent_panel as agent_panel_module
 from phone_link.ui.agent_panel import AgentPanel, ChatInput
 
@@ -107,6 +109,29 @@ class AgentPanelTests(unittest.TestCase):
         self.panel.stop()
         self.assertFalse(self.panel._pending_local_send)
         self.assertTrue(self.panel.input.isEnabled())
+
+
+    def test_reply_file_blocks_are_saved_and_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch.dict(os.environ, {FILES_ENV: folder}):
+                bubble = self.panel._add_bubble("assistant")
+                self.panel._bubble = bubble
+                self.panel._finish("```file:note.md\nhi\n```", None, False)
+            self.assertEqual(
+                (Path(folder) / "note.md").read_text(encoding="utf-8"), "hi\n"
+            )
+        tools = bubble.findChildren(QLabel, "AgentTool")
+        self.assertTrue(any("Saved note.md" in label.text() for label in tools))
+
+    def test_unsafe_file_names_are_reported_not_written(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch.dict(os.environ, {FILES_ENV: folder}):
+                bubble = self.panel._add_bubble("assistant")
+                self.panel._bubble = bubble
+                self.panel._finish("```file:../escape.md\nhi\n```", None, False)
+            self.assertEqual(list(Path(folder).iterdir()), [])
+        tools = bubble.findChildren(QLabel, "AgentTool")
+        self.assertTrue(any("Could not save" in label.text() for label in tools))
 
 
 class ChatInputTests(unittest.TestCase):

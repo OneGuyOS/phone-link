@@ -61,8 +61,9 @@ Windows Phone Link. One window contains:
   from a composer. See [Messages](#messages).
 - **Agent chat:** another tab in the right panel streams replies from a small
   llama.cpp model running on this computer, which Phone Link starts itself, or
-  from a llama.cpp server on the phone through Termux and `adb forward`. See
-  [Agent chat](#agent-chat).
+  from a llama.cpp server on the phone through Termux and `adb forward`. Both
+  use the same model and prompt when it is installed, and the assistant can
+  save files into a folder on this computer. See [Agent chat](#agent-chat).
 - **Top bar:** phone name, **USB or Wi-Fi** transport, battery level and charging
   state.
 
@@ -334,6 +335,11 @@ live in `~/.local/share/phone-link/agent.json` with mode `0600`. A custom
 OpenAI-compatible endpoint can still be added from the dialog, but the two
 built-in providers are the intended defaults.
 
+Both built-in providers share the same default system prompt, and when the
+same `.gguf` is on both machines they run the same weights, so the assistant
+behaves the same whichever one is selected. The assistant can also save files
+on this computer; see [Saving files](#saving-files).
+
 ### Backends
 
 | Backend | What it is | Reachable at |
@@ -358,13 +364,18 @@ Detection is automatic, in this order:
   `~/zara/llama.cpp/build/bin/llama-server` and the usual local build paths.
 - `PHONE_LINK_LOCAL_MODEL` points at the `.gguf` file; without it, the first
   model in `~/.local/share/phone-link/models` is used (preferring a name
-  containing `OLMoE`), then the first model in `~/zara/models`.
+  containing `Qwen3.5-4B`, then `OLMoE`), then the first model in
+  `~/zara/models`. The Qwen preference means the laptop runs the same weights
+  as the Termux server when both are installed.
 
 The server is private to the computer (`127.0.0.1`), CPU-only, with one request
-slot and a 4096-token context. The model itself is not bundled in this
-repository — GGUF weights are several gigabytes — but the app manages the
-server process, so no separate terminal is needed. To use a different binary or
-model, export the two variables above and restart Phone Link.
+slot and a 4096-token context. Thinking is disabled with
+`--chat-template-kwargs '{"enable_thinking":false}'`, matching the phone
+server, so a reasoning model answers instead of filling the screen with hidden
+reasoning. The model itself is not bundled in this repository — GGUF weights
+are several gigabytes — but the app manages the server process, so no separate
+terminal is needed. To use a different binary or model, export the two
+variables above and restart Phone Link.
 
 If the binary or model cannot be found, the agent panel shows an error bubble
 explaining which environment variable to set. The server is only started for
@@ -391,7 +402,9 @@ provider's default model name is `phone`, matching the `--alias` above;
 llama.cpp ignores the name in single-model mode, so an unaliased server also
 works. The settings dialog has a **Set up ADB forward and test** button that
 runs the forward command and probes the endpoint. Phones are memory-constrained;
-small quantized models are the practical choice.
+small quantized models are the practical choice. Using the same file on both
+machines — `Qwen3.5-4B-Q4_K_M.gguf` here and on the phone — means the local and
+phone providers answer with identical weights.
 
 For a reasoning model, add
 `--chat-template-kwargs '{"enable_thinking":false}'` so replies are not spent
@@ -399,13 +412,35 @@ on hidden chain-of-thought tokens. Keep Termux running (its wake lock is enough
 to keep the server alive in the background); the server stops when Termux is
 force-stopped.
 
+### Saving files
+
+The small models behind the built-in providers have no filesystem access, so
+the system prompt teaches them one convention. Ask for a file and the reply
+ends with a fenced block whose info string is `file:NAME`:
+
+````text
+```file:notes.md
+# Notes
+...
+```
+````
+
+Phone Link writes the block's content to `~/Documents/Phone Link` (override
+with `PHONE_LINK_FILES`) and adds a `Saved notes.md → …` line under the reply.
+The **Files** button in the agent header opens that folder. Only plain
+filenames are accepted — no folders, `..`, or hidden names — and one reply can
+save at most five files of up to 1 MB each. A block that cannot be saved is
+reported in the chat and nothing is written. Files are saved only for
+OpenAI-compatible providers; the Claude and Codex CLI agents already write
+files through their own tools.
+
 ### Privacy
 
 Both built-in providers keep the conversation on this computer or on your own
 phone. A custom endpoint receives the transcript and the system prompt; nothing
 else is sent. The system prompt explicitly tells the model it cannot see the
 phone unless you describe it, so it will not pretend to read notifications or
-messages.
+messages. Saved files are written locally and are never uploaded.
 
 ---
 
@@ -581,7 +616,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 130 unit tests covering ADB parsing and selection, name/battery parsing,
+- 141 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -601,10 +636,13 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   success and failure), and the agent backends
   (URL construction, SSE parsing, error descriptions, conversation prompts,
   Claude/Codex argv and event parsing, provider storage with `0600`
-  permissions, dropping providers removed from the presets, local server and
-  model detection, llama-server argument construction, cold start and stop
-  against a fake server process, the panel's wait-for-local-server state,
-  ADB forward direction, plus headless panel and composer tests).
+  permissions, dropping providers removed from the presets, the shared-prompt
+  migration, `file:` block parsing and safe file saving (path escapes,
+  oversized files), local server and model detection (including preferring the
+  phone's Qwen3.5 weights), llama-server argument construction, cold start and
+  stop against a fake server process, the panel's wait-for-local-server state,
+  saving files from a reply, ADB forward direction, plus headless panel and
+  composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
   counts, and loaded thread pages 50 messages at a time using
@@ -619,8 +657,14 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   local fake SSE endpoint that served a multi-chunk completion, including the
   `[DONE]` sentinel. With the real `agent.json`, provider pruning left exactly
   `zara-fast` and `phone`, the app fell back from a removed active provider to
-  Zara Fast, and it detected the installed `llama-server`, the OLMoE `.gguf`
-  and the already-running server.
+  Zara Fast, and it detected the installed `llama-server` and models.
+- Cold start with the real weights: with no server running, the first message
+  on **Zara Fast** made Phone Link start `llama-server` with
+  `Qwen3.5-4B-Q4_K_M.gguf` — the same file the phone serves — and
+  `--chat-template-kwargs '{"enable_thinking":false}'`. The reply streamed
+  back, and a request to save `hello.txt` produced the file in the files
+  folder with the right content and a `Saved hello.txt → …` line under the
+  reply. Shutting the panel down stopped the server it had started.
 - The phone server end to end on the real Galaxy S25 FE: Termux's
   `llama-cpp` package served a 4B Q4 model with `--alias phone` on port 8080,
   `adb forward tcp:8080 tcp:8080` exposed it to the computer, `/v1/models`
@@ -628,16 +672,15 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   through the SSE parser. The server stayed reachable after Termux was sent to
   the background. Reasoning was disabled with
   `--chat-template-kwargs '{"enable_thinking":false}'`; without it the same
-  model spent its reply on hidden reasoning tokens.
+  model spent its reply on hidden reasoning tokens. With the new shared
+  prompt, the phone provider also answered with a `file:` block, and the app
+  saved it exactly as it does for the local provider.
 
 ### What was not tested
 
-- Starting the local server from a cold state with the real 4.2 GB model was
-  not observed because a server started outside the app was already running on
-  port 18089; the start, readiness and stop path was exercised end to end with a
-  fake `llama-server` that answers `/v1/models`, and the real binary and model
-  detection were checked. Custom cloud endpoints were not called during
-  development.
+- Custom cloud endpoints were not called during development. The phone
+  provider was tested with a 4B model; larger or reasoning-heavy models on the
+  phone were not tried.
 - Manual touch, mouse and keyboard interaction inside the embedded real scrcpy
   window. scrcpy's shortcut forwarding itself was verified: an XTest MOD+h sent
   to the embedded real scrcpy window moved the phone to its launcher, and a
