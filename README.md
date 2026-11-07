@@ -55,6 +55,11 @@ Windows Phone Link. One window contains:
   move the desktop pointer, type, advance slides, lock the session or run a
   configured command. Those requests are handled by the running KDE Connect
   daemon.
+- **Agent chat:** a second tab in the right panel streams replies from an
+  OpenAI-compatible endpoint (a local llama.cpp/Zara server, Ollama, a llama.cpp
+  server on the phone through Termux and `adb forward`, or a free cloud tier) or
+  from the Claude Code / Codex CLI agents with file and shell access. See
+  [Agent chat](#agent-chat).
 - **Top bar:** phone name, **USB or Wi-Fi** transport, battery level and charging
   state.
 
@@ -282,6 +287,91 @@ mirrored over the wireless transport.
 
 ---
 
+## Agent chat
+
+The right panel has a **Notifications / Agent** tab pair (`Ctrl+Shift+A`
+switches between them). The agent tab is a streaming chat client that can talk
+to a model on this laptop, a model on the phone, a free cloud API, or a local
+CLI agent with real shell and file access.
+
+Open the ⚙ button in the agent header to choose a backend and store its
+settings. Providers and API keys live in
+`~/.local/share/phone-link/agent.json` with mode `0600`; environment variables
+are used as a fallback when a key field is empty.
+
+### Backends
+
+| Backend | What it is | Reachable at |
+| --- | --- | --- |
+| Local llama.cpp / Zara | OpenAI-compatible server on this computer | `http://127.0.0.1:18089/v1`, `:18090`, `:18091` presets |
+| Ollama | OpenAI-compatible endpoint shipped with Ollama | `http://127.0.0.1:11434/v1` |
+| Phone server | llama.cpp running in Termux, forwarded over ADB | `http://127.0.0.1:8080/v1` |
+| Free cloud | Gemini, Groq, Cerebras, OpenRouter `:free`, Mistral Experiment | HTTPS endpoints |
+| Claude Code CLI | `claude -p --output-format stream-json` | local `claude` command |
+| Codex CLI | `codex exec --json` | local `codex` command |
+
+The settings dialog can query `/v1/models` on any OpenAI-compatible backend
+(**Fetch**) and can inspect a new endpoint before saving it. The agent panel
+probes local providers on startup and picks a reachable one automatically.
+
+### Free API keys
+
+| Provider | Free tier | Key page |
+| --- | --- | --- |
+| Google Gemini | Flash models on the free tier | <https://aistudio.google.com/apikey> |
+| Groq | Fast OpenAI-compatible inference | <https://console.groq.com/keys> |
+| Cerebras | High-throughput OSS models | <https://cloud.cerebras.ai> |
+| OpenRouter | Models tagged `:free` | <https://openrouter.ai/keys> |
+| Mistral | Experiment/free tier | <https://console.mistral.ai> |
+
+Free tiers change their model names and quotas; use **Fetch** in the settings
+dialog to see what an endpoint currently offers. Phone Link stores the key but
+does not send it anywhere except the endpoint you selected.
+
+### A model on the phone
+
+Run a llama.cpp server inside Termux on the phone, then forward its port to the
+computer over the existing ADB connection:
+
+```bash
+# in Termux on the phone
+pkg install llama-cpp
+llama-server -m model.gguf --host 127.0.0.1 --port 8080
+
+# on the computer, with the phone connected over USB or Wi-Fi ADB
+adb forward tcp:8080 tcp:8080
+```
+
+`adb forward` maps the computer's `127.0.0.1:8080` to the phone's server, so
+the **Phone server** preset works without exposing Termux to the network. The
+settings dialog has a **Set up ADB forward and test** button that runs the
+forward command and probes the endpoint. Phones are memory-constrained; small
+quantized models are the practical choice.
+
+### CLI agents
+
+The Claude Code and Codex presets run the local CLI, so they can read and edit
+files and run commands in the working directory. This is deliberately the
+"full agent" mode: the permission mode (Claude) and sandbox (Codex) are editable
+in the settings dialog, and the defaults are chosen so the dialog does not block
+mid-turn. Review the working directory and the selected mode before sending a
+task, because the agent acts with your user account's permissions. Every tool
+line the CLI emits is shown in the transcript in a muted block.
+
+The CLI agents start a fresh process for each message, so the whole visible
+conversation is included in the prompt. Very long chats will eventually hit the
+command-line length limit; start a **New** chat when that happens.
+
+### Privacy
+
+Local backends and CLI agents keep the conversation on this computer (or on your
+own phone). Cloud providers receive the transcript, the system prompt and
+nothing else. The system prompt explicitly tells the model it cannot see the
+phone unless you describe it, so it will not pretend to read notifications or
+messages.
+
+---
+
 ## Tests
 
 Install the test-only dependencies once:
@@ -454,7 +544,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 63 unit tests covering ADB parsing and selection, name/battery parsing,
+- 88 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -466,10 +556,27 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   (including clamping and invalid values), duration formatting, the
   phone-action helpers (sink JSON parsing and clamping, the typed gdbus
   arguments for the SMS plugin, the loaded-plugin list, this computer's KDE
-  Connect id, and the adb stop-ring broadcast command).
+  Connect id, and the adb stop-ring broadcast command), and the agent backends
+  (URL construction, SSE parsing, error descriptions, conversation prompts,
+  Claude/Codex argv and event parsing, provider storage with `0600`
+  permissions, environment key fallback, ADB forward direction, plus headless
+  panel and composer tests).
+- Agent chat against the live local **Zara Fast** llama.cpp server on this
+  computer: a question sent from the panel streamed back token by token, the
+  provider was auto-selected on startup, and the transcript, Stop button and
+  provider switch behaved as designed. Streaming was also exercised against a
+  local fake SSE endpoint that served a multi-chunk completion, including the
+  `[DONE]` sentinel. The phone server path was verified only up to running the
+  ADB forward command and probing the endpoint, not with a model actually
+  loaded in Termux.
 
 ### What was not tested
 
+- The Claude Code and Codex CLI presets were not run end to end; their argv
+  construction and JSON event parsing are unit-tested, and the executables must
+  be installed and on `PATH` on the machine that uses them. The free cloud
+  providers were not called with real keys during development, so quotas and
+  model names should be checked with **Fetch** in the settings dialog.
 - Manual touch, mouse and keyboard interaction inside the embedded real scrcpy
   window. scrcpy's shortcut forwarding itself was verified: an XTest MOD+h sent
   to the embedded real scrcpy window moved the phone to its launcher, and a
@@ -507,6 +614,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 
 - KDE Connect must be installed and running; Phone Link does not reimplement the
   protocol or replace the Android app.
+- Agent conversations live in memory only and start empty after a restart.
+  There are no file attachments, and the CLI presets start a fresh process for
+  every message, so the whole transcript is resent each turn. API keys are
+  stored in a `0600` file but not encrypted; anyone who can read your home
+  directory can read them.
 - Only **active** notifications are requested from KDE Connect. Notifications
   the phone clears while Phone Link is open move to **Recent** (last 30). Recent
   items are saved across restarts in
@@ -765,13 +877,17 @@ when the clipboard button is pressed or while the optional auto-sync toggle is
 on. Phone files are read through a local sshfs mount over the paired KDE
 Connect connection. Text messages are handed to the phone through KDE Connect
 and sent by its own SIM, not by a web or cloud messaging service. There is no
-telemetry and no network service in Phone Link itself.
+telemetry and no background network service. The agent chat is the only part of
+Phone Link that makes outbound network requests: when you send a message it
+contacts the provider you selected, and local and CLI providers stay on this
+machine.
 
 ## Project layout
 
 ```text
 phone_link/          application code
-  ui/                window, header, mirror stage, notification panel
+  agent.py           agent backends (HTTP streaming, CLI agents, provider store)
+  ui/                window, header, mirror stage, notification panel, agent chat
 tests/               unit tests, mock KDE daemon, fake adb/scrcpy, UI test
 run.sh               launcher
 README.md

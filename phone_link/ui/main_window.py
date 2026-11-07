@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 
-from PySide6.QtCore import QSettings, QTimer, QUrl
+from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QCloseEvent,
     QDesktopServices,
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QMainWindow,
+    QPushButton,
+    QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -27,6 +29,7 @@ from ..clipboard_sync import ClipboardSyncGate
 from ..dependencies import DependencyReport
 from ..kdeconnect import KdeConnectClient
 from ..models import KdeSnapshot, PhoneSnapshot
+from .agent_panel import AgentPanel
 from .dialogs import ShortcutsDialog
 from .header import HeaderBar
 from .icons import app_icon
@@ -111,7 +114,40 @@ class MainWindow(QMainWindow):
         self.notifications.historyClearRequested.connect(self._clear_history)
         self.notifications.retryRequested.connect(self.refresh_all)
         self.notifications.filesDropped.connect(self._send_files)
-        content.addWidget(self.notifications, 4)
+
+        self.agent_panel = AgentPanel(report.adb_path, root_widget)
+        self.agent_panel.setMinimumWidth(360)
+
+        right_column = QWidget(root_widget)
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(6)
+        self.notifications_tab = QPushButton("Notifications", right_column)
+        self.agent_tab = QPushButton("Agent", right_column)
+        for tab in (self.notifications_tab, self.agent_tab):
+            tab.setObjectName("PanelTab")
+            tab.setCheckable(True)
+            tab.setCursor(Qt.CursorShape.PointingHandCursor)
+            tab_row.addWidget(tab)
+        tab_row.addStretch(1)
+        right_layout.addLayout(tab_row)
+
+        self.right_stack = QStackedWidget(right_column)
+        self.right_stack.addWidget(self.notifications)
+        self.right_stack.addWidget(self.agent_panel)
+        right_layout.addWidget(self.right_stack, 1)
+
+        self.notifications_tab.clicked.connect(lambda: self._show_right_tab(0))
+        self.agent_tab.clicked.connect(lambda: self._show_right_tab(1))
+        self._show_right_tab(
+            self._settings.value("panel/right_tab", 0, type=int)
+        )
+
+        content.addWidget(right_column, 4)
         root.addLayout(content, 1)
 
         status = QStatusBar(self)
@@ -170,6 +206,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+Shift+D", self._toggle_desktop),
             ("Ctrl+Shift+P", self._toggle_popout),
             ("Ctrl+F", self._focus_search),
+            ("Ctrl+Shift+A", self._toggle_right_tab),
             ("F11", self._toggle_fullscreen),
             ("F1", self._show_shortcuts),
             ("Ctrl+Q", self.close),
@@ -182,6 +219,18 @@ class MainWindow(QMainWindow):
     def _focus_search(self) -> None:
         if not self.notifications.focus_search():
             self._flash("No notifications to search.")
+
+    def _show_right_tab(self, index: int) -> None:
+        index = 1 if index == 1 else 0
+        self.right_stack.setCurrentIndex(index)
+        self.notifications_tab.setChecked(index == 0)
+        self.agent_tab.setChecked(index == 1)
+        self._settings.setValue("panel/right_tab", index)
+        if index == 1:
+            self.agent_panel.input.setFocus()
+
+    def _toggle_right_tab(self) -> None:
+        self._show_right_tab(0 if self.right_stack.currentIndex() == 1 else 1)
 
     def _rotate_screen(self) -> None:
         if not self.mirror.rotate.isEnabled():

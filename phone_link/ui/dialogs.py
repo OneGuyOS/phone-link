@@ -98,6 +98,7 @@ class ShortcutsDialog(QDialog):
         ("Ctrl+Shift+D", "Switch the mirror between the phone screen and Samsung DeX"),
         ("Ctrl+Shift+P", "Pop the DeX desktop out into its own window, or dock it"),
         ("Ctrl+F", "Focus the notification search box"),
+        ("Ctrl+Shift+A", "Switch the right panel between notifications and the agent"),
         ("Esc", "Clear the search while it has focus"),
         ("F11", "Toggle full screen"),
         ("F1", "Show this shortcut list"),

@@ -510,6 +510,183 @@ QTextEdit#CodeBlock, QPlainTextEdit#CodeBlock {{
     padding: 10px;
     selection-background-color: {ACCENT};
 }}
+QComboBox {{
+    background: #0f151c;
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 5px 9px;
+    font-size: 12px;
+}}
+QComboBox:hover {{
+    border-color: {BORDER_STRONG};
+}}
+QComboBox:focus {{
+    border-color: {ACCENT};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 18px;
+}}
+QComboBox QAbstractItemView {{
+    background: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER_STRONG};
+    selection-background-color: {ACCENT_SOFT};
+    selection-color: {TEXT};
+    outline: none;
+}}
+QComboBox#AgentProvider {{
+    padding: 4px 8px;
+    font-size: 11px;
+}}
+QGroupBox {{
+    border: 1px solid {BORDER};
+    border-radius: 9px;
+    margin-top: 14px;
+    padding: 10px 8px 6px 8px;
+    font-size: 11px;
+    color: {MUTED};
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 9px;
+    padding: 0 4px;
+    color: {MUTED};
+    font-weight: 700;
+}}
+QGroupBox QLabel {{
+    color: {TEXT_SOFT};
+}}
+QListWidget {{
+    background: #0f151c;
+    color: {TEXT_SOFT};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 4px;
+    outline: none;
+}}
+QListWidget::item {{
+    padding: 7px 8px;
+    border-radius: 6px;
+}}
+QListWidget::item:hover {{
+    background: {SURFACE_HOVER};
+}}
+QListWidget::item:selected {{
+    background: {ACCENT_SOFT};
+    color: {TEXT};
+}}
+QPushButton#PanelTab {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 3px 11px;
+    color: {MUTED};
+    font-size: 11px;
+    font-weight: 600;
+}}
+QPushButton#PanelTab:hover {{
+    color: {TEXT};
+    background: {SURFACE};
+}}
+QPushButton#PanelTab:checked {{
+    color: {TEXT};
+    background: {SURFACE_ALT};
+    border-color: {BORDER_STRONG};
+}}
+QWidget#AgentSurface {{
+    background: transparent;
+}}
+QScrollArea#AgentScroll {{
+    background: transparent;
+    border: none;
+}}
+QFrame#AgentBubble {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+}}
+QFrame#AgentBubble[role="user"] {{
+    background: {ACCENT_SOFT};
+    border-color: #23506a;
+}}
+QFrame#AgentBubble[role="error"] {{
+    background: #2a161c;
+    border-color: #6b2b37;
+}}
+QFrame#AgentBubble[role="system"] {{
+    background: {SURFACE_ALT};
+}}
+QLabel#AgentRole {{
+    color: {DIM};
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+QLabel#AgentText {{
+    color: {TEXT};
+    font-size: 12px;
+}}
+QLabel#AgentTool {{
+    color: {MUTED};
+    font-family: "Noto Sans Mono";
+    font-size: 10px;
+    background: #0f151c;
+    border-radius: 5px;
+    padding: 3px 6px;
+}}
+QLabel#AgentStatus {{
+    color: {ACCENT};
+    font-size: 10px;
+}}
+QLabel#AgentHint {{
+    color: {DIM};
+    font-size: 10px;
+}}
+QLabel#AgentHint a {{
+    color: {ACCENT};
+}}
+QPlainTextEdit#AgentComposer {{
+    font-size: 12px;
+}}
+QPushButton#AgentSend {{
+    background: {ACCENT};
+    color: #07141d;
+    border: 1px solid {ACCENT};
+    font-weight: 700;
+    padding: 5px 16px;
+}}
+QPushButton#AgentSend:hover {{
+    background: {ACCENT_HOVER};
+    border-color: {ACCENT_HOVER};
+}}
+QPushButton#AgentSend:disabled {{
+    background: #1b212a;
+    color: {DIM};
+    border-color: #242d37;
+}}
+QPushButton#AgentStop {{
+    background: transparent;
+    color: {DANGER};
+    border: 1px solid #6b2b37;
+    padding: 5px 12px;
+}}
+QPushButton#AgentStop:hover {{
+    background: #2a161c;
+}}
+QPushButton#AgentIconButton {{
+    background: {SURFACE_ALT};
+    color: {TEXT_SOFT};
+    border: 1px solid {BORDER};
+    border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 11px;
+}}
+QPushButton#AgentIconButton:hover {{
+    background: {SURFACE_HOVER};
+    color: {TEXT};
+}}
 """
 
 
