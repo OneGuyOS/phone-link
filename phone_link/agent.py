@@ -466,12 +466,23 @@ class ModelFetcher(QObject):
         try:
             models = list_models(provider)
         except Exception as exc:
-            self.failed.emit(describe_http_error(exc))
+            try:
+                self.failed.emit(describe_http_error(exc))
+            except RuntimeError:
+                # The settings dialog was closed while the request was in
+                # flight, taking this QObject with it.
+                pass
             return
         if not models:
-            self.failed.emit("The endpoint returned no models.")
+            try:
+                self.failed.emit("The endpoint returned no models.")
+            except RuntimeError:
+                pass
         else:
-            self.finished.emit(models)
+            try:
+                self.finished.emit(models)
+            except RuntimeError:
+                pass
 
 
 # --------------------------------------------------------------------------
