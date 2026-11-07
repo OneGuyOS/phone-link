@@ -27,8 +27,9 @@ from PySide6.QtWidgets import (
 from ..adb import AdbMonitor
 from ..clipboard_sync import ClipboardSyncGate
 from ..dependencies import DependencyReport
-from ..kdeconnect import KdeConnectClient
+from ..kdeconnect import DAEMON_PATH, KdeConnectClient
 from ..models import KdeSnapshot, PhoneSnapshot
+from ..sms import SmsClient
 from .agent_panel import AgentPanel
 from .dialogs import ShortcutsDialog
 from .header import HeaderBar
@@ -37,6 +38,7 @@ from .media import MediaBar
 from .mirror import MirrorPanel
 from .notifications import NotificationsPanel
 from .phone_actions import PhoneActionsMenu, SmsDialog, VolumeDialog
+from .sms_panel import SmsPanel
 from .wifi_dialog import WifiConnectDialog
 
 
@@ -115,6 +117,9 @@ class MainWindow(QMainWindow):
         self.notifications.retryRequested.connect(self.refresh_all)
         self.notifications.filesDropped.connect(self._send_files)
 
+        self.sms_panel = SmsPanel(root_widget)
+        self.sms_panel.setMinimumWidth(360)
+
         self.agent_panel = AgentPanel(report.adb_path, root_widget)
         self.agent_panel.setMinimumWidth(360)
 
@@ -127,8 +132,9 @@ class MainWindow(QMainWindow):
         tab_row.setContentsMargins(0, 0, 0, 0)
         tab_row.setSpacing(6)
         self.notifications_tab = QPushButton("Notifications", right_column)
+        self.messages_tab = QPushButton("Messages", right_column)
         self.agent_tab = QPushButton("Agent", right_column)
-        for tab in (self.notifications_tab, self.agent_tab):
+        for tab in (self.notifications_tab, self.messages_tab, self.agent_tab):
             tab.setObjectName("PanelTab")
             tab.setCheckable(True)
             tab.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -138,11 +144,13 @@ class MainWindow(QMainWindow):
 
         self.right_stack = QStackedWidget(right_column)
         self.right_stack.addWidget(self.notifications)
+        self.right_stack.addWidget(self.sms_panel)
         self.right_stack.addWidget(self.agent_panel)
         right_layout.addWidget(self.right_stack, 1)
 
         self.notifications_tab.clicked.connect(lambda: self._show_right_tab(0))
-        self.agent_tab.clicked.connect(lambda: self._show_right_tab(1))
+        self.messages_tab.clicked.connect(lambda: self._show_right_tab(1))
+        self.agent_tab.clicked.connect(lambda: self._show_right_tab(2))
         self._show_right_tab(
             self._settings.value("panel/right_tab", 0, type=int)
         )
@@ -170,6 +178,25 @@ class MainWindow(QMainWindow):
         self.kde.phoneVolumeChanged.connect(self._apply_phone_volume)
         self.kde.phoneMutedChanged.connect(self._apply_phone_muted)
         self.kde.actionError.connect(self._flash)
+
+        self._sms_plugin_device = ""
+        self._sms_plugin_ok = False
+        self.sms = SmsClient(self)
+        self.sms.changed.connect(self._on_sms_changed)
+        self.sms.threadLoading.connect(
+            lambda thread_id: self.sms_panel.set_thread_loading(thread_id, True)
+        )
+        self.sms.threadLoaded.connect(self._on_sms_thread_loaded)
+        self.sms.sent.connect(self._on_sms_sent)
+        self.sms.sendFailed.connect(self._on_sms_send_failed)
+        self.sms.error.connect(self._on_sms_error)
+        self.sms_panel.threadOpened.connect(self._load_sms_thread)
+        self.sms_panel.loadEarlierRequested.connect(
+            lambda thread_id: self.sms.load_thread(thread_id, earlier=True)
+        )
+        self.sms_panel.replyRequested.connect(self.sms.reply)
+        self.sms_panel.newMessageRequested.connect(self._open_sms_dialog)
+        self.sms_panel.refreshRequested.connect(self._refresh_sms)
 
         # Optional automatic clipboard sync.  Off by default: forwarding every
         # copy also forwards passwords and anything else on the clipboard.
@@ -206,6 +233,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+Shift+D", self._toggle_desktop),
             ("Ctrl+Shift+P", self._toggle_popout),
             ("Ctrl+F", self._focus_search),
+            ("Ctrl+Shift+M", lambda: self._show_right_tab(1)),
             ("Ctrl+Shift+A", self._toggle_right_tab),
             ("F11", self._toggle_fullscreen),
             ("F1", self._show_shortcuts),
@@ -221,16 +249,19 @@ class MainWindow(QMainWindow):
             self._flash("No notifications to search.")
 
     def _show_right_tab(self, index: int) -> None:
-        index = 1 if index == 1 else 0
+        index = min(2, max(0, int(index)))
         self.right_stack.setCurrentIndex(index)
         self.notifications_tab.setChecked(index == 0)
-        self.agent_tab.setChecked(index == 1)
+        self.messages_tab.setChecked(index == 1)
+        self.agent_tab.setChecked(index == 2)
         self._settings.setValue("panel/right_tab", index)
-        if index == 1:
+        if index == 2:
             self.agent_panel.input.setFocus()
+        elif index == 1 and self.sms_panel.current_thread() is not None:
+            self.sms_panel.input.setFocus()
 
     def _toggle_right_tab(self) -> None:
-        self._show_right_tab(0 if self.right_stack.currentIndex() == 1 else 1)
+        self._show_right_tab(0 if self.right_stack.currentIndex() == 2 else 2)
 
     def _rotate_screen(self) -> None:
         if not self.mirror.rotate.isEnabled():
@@ -318,6 +349,75 @@ class MainWindow(QMainWindow):
         self._kde_snapshot = snapshot
         self._update_header()
         self.notifications.set_snapshot(snapshot)
+        self._sync_sms(snapshot)
+
+    def _sync_sms(self, snapshot: KdeSnapshot) -> None:
+        """Point the SMS client at the phone, but only when its plugin is on."""
+
+        device = snapshot.device
+        connected = snapshot.connected and device is not None
+        available = False
+        path = ""
+        if connected:
+            if self._sms_plugin_device != device.id:
+                plugins = self.kde.phone_plugins()
+                self._sms_plugin_device = device.id
+                self._sms_plugin_ok = (
+                    plugins is None or "kdeconnect_sms" in plugins
+                )
+            available = self._sms_plugin_ok
+            if available:
+                path = f"{DAEMON_PATH}/devices/{device.id}"
+        else:
+            self._sms_plugin_device = ""
+            self._sms_plugin_ok = False
+        self.sms.set_device(path)
+        self.sms_panel.set_phone(
+            device.name if device is not None else "",
+            connected=connected,
+            available=available,
+            message=snapshot.message if not (connected and available) else "",
+        )
+
+    def _refresh_sms(self) -> None:
+        self._sms_plugin_device = ""
+        self._sms_plugin_ok = False
+        self.kde.refresh()
+        self.sms.refresh()
+
+    def _on_sms_changed(self) -> None:
+        self.sms_panel.set_conversations(self.sms.conversations())
+        self._sync_open_sms_thread()
+
+    def _sync_open_sms_thread(self) -> None:
+        thread_id = self.sms_panel.current_thread()
+        if thread_id is None:
+            return
+        conversation = self.sms.conversation(thread_id)
+        messages = conversation.messages if conversation is not None else ()
+        self.sms_panel.set_thread(
+            thread_id, messages, self.sms.has_more(thread_id)
+        )
+
+    def _load_sms_thread(self, thread_id: int) -> None:
+        self.sms_panel.set_thread_loading(thread_id, True)
+        self.sms.load_thread(thread_id)
+
+    def _on_sms_thread_loaded(self, thread_id: int) -> None:
+        self._sync_open_sms_thread()
+        self.sms_panel.set_thread_loading(thread_id, False)
+
+    def _on_sms_sent(self, thread_id: int) -> None:
+        self.sms_panel.send_succeeded(thread_id)
+        self._flash("Message sent.")
+
+    def _on_sms_send_failed(self, thread_id: int, message: str) -> None:
+        self.sms_panel.send_failed(thread_id, message)
+        self._flash(message)
+
+    def _on_sms_error(self, message: str) -> None:
+        self.sms_panel.set_error(message)
+        self._flash(message)
 
     def _update_header(self) -> None:
         adb = self._adb_snapshot
@@ -611,5 +711,6 @@ class MainWindow(QMainWindow):
         self._adb_timer.stop()
         self.mirror.stop()
         self.adb.stop()
+        self.sms.stop()
         self.kde.stop()
         event.accept()

@@ -55,7 +55,11 @@ Windows Phone Link. One window contains:
   move the desktop pointer, type, advance slides, lock the session or run a
   configured command. Those requests are handled by the running KDE Connect
   daemon.
-- **Agent chat:** a second tab in the right panel streams replies from an
+- **Messages:** a second tab in the right panel lists the phone's SMS
+  conversations with their unread count, preview and time, opens a threaded
+  view with date separators, loads older messages as you scroll up, and replies
+  from a composer. See [Messages](#messages).
+- **Agent chat:** another tab in the right panel streams replies from an
   OpenAI-compatible endpoint (a local llama.cpp/Zara server, Ollama, a llama.cpp
   server on the phone through Termux and `adb forward`, or a free cloud tier) or
   from the Claude Code / Codex CLI agents with file and shell access. See
@@ -111,6 +115,8 @@ The status bar mentions them at startup, and **F1** opens the in-app list.
 | `Ctrl+Shift+D` | Switch the mirror between the phone screen and DeX |
 | `Ctrl+Shift+P` | Pop the DeX desktop out, or dock it again |
 | `Ctrl+F` | Focus the notification search box |
+| `Ctrl+Shift+M` | Open the Messages tab |
+| `Ctrl+Shift+A` | Switch between the notifications and agent tabs |
 | `Esc` | Clear the search while it is focused |
 | `F11` | Toggle full screen |
 | `F1` | Show the keyboard shortcut list |
@@ -287,12 +293,41 @@ mirrored over the wireless transport.
 
 ---
 
+## Messages
+
+The right panel has three tabs: **Notifications**, **Messages** and **Agent**.
+`Ctrl+Shift+M` opens Messages directly; the tab remembers which one was last
+shown.
+
+The list shows every conversation with the phone's own unread count, the latest
+message as a preview and its time. The search box filters by contact, number or
+the text of the latest message. Opening a conversation shows its messages as
+incoming and outgoing bubbles with day separators; scrolling to the top loads
+the next older page. The composer replies through KDE Connect's SMS plugin, and
+**New** opens the same SMS dialog as the header menu for starting a conversation
+with a number.
+
+Messages come from KDE Connect's Android SMS plugin, which Phone Link reads on
+the session D-Bus. The conversation list is seeded once and then kept current by
+`gdbus monitor` signals from the phone; refreshing re-seeds it. Threads are
+requested from the phone 50 messages at a time and are not saved on the
+computer. Enabling the SMS plugin in the Android app and in KDE Connect's
+plugin settings is required. `gdbus` (from `libglib2.0-bin`) must be
+installed — PySide6 cannot express the plugin's 64-bit D-Bus signature, so
+Phone Link shells out to `gdbus` for both reading and sending.
+
+The tab is read/write for text only: attachments appear as a small chip naming
+their type but are not downloaded or previewed, delivery reports are not
+available, and a multi-SIM phone sends from its default SIM.
+
+---
+
 ## Agent chat
 
-The right panel has a **Notifications / Agent** tab pair (`Ctrl+Shift+A`
-switches between them). The agent tab is a streaming chat client that can talk
-to a model on this laptop, a model on the phone, a free cloud API, or a local
-CLI agent with real shell and file access.
+The right panel has **Notifications / Messages / Agent** tabs (`Ctrl+Shift+A`
+switches between notifications and the agent). The agent tab is a streaming
+chat client that can talk to a model on this laptop, a model on the phone, a
+free cloud API, or a local CLI agent with real shell and file access.
 
 Open the ⚙ button in the agent header to choose a backend and store its
 settings. Providers and API keys live in
@@ -455,10 +490,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   edge and clip its border and dismiss button.
 - Window state: closing the mock window wrote its geometry to the isolated test
   settings (`GEOMETRY_SAVED True`).
-- Shortcuts: all ten window shortcuts were registered (`F5`, `Ctrl+R`,
-  `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+F`, `F11`, `F1`,
-  `Ctrl+Q`, `Ctrl+W`), and the shortcut dialog rendered with all nine entries
-  offscreen.
+- Shortcuts: all twelve window shortcuts were registered (`F5`, `Ctrl+R`,
+  `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+F`, `Ctrl+Shift+M`,
+  `Ctrl+Shift+A`, `F11`, `F1`, `Ctrl+Q`, `Ctrl+W`), and the shortcut dialog
+  rendered with all eleven entries offscreen.
 - DeX: the mock run switched the frame to a 16:9 desktop, showed the Pop out
   button, popped DeX into a second fake scrcpy process while the main mirror
   stayed embedded, docked it again, and switched back to the phone frame. The
@@ -544,7 +579,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 88 unit tests covering ADB parsing and selection, name/battery parsing,
+- 118 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -556,11 +591,23 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   (including clamping and invalid values), duration formatting, the
   phone-action helpers (sink JSON parsing and clamping, the typed gdbus
   arguments for the SMS plugin, the loaded-plugin list, this computer's KDE
-  Connect id, and the adb stop-ring broadcast command), and the agent backends
+  Connect id, and the adb stop-ring broadcast command), the SMS GVariant parser
+  (both quote styles, variant wrappers, `int64`/`uint64` and annotations),
+  conversation grouping and unread counts, SMS gdbus argument construction,
+  thread paging and deduplication in the SMS client, headless Messages-panel
+  tests (list, search, unread badge, bubbles and day separators, composer
+  success and failure), and the agent backends
   (URL construction, SSE parsing, error descriptions, conversation prompts,
   Claude/Codex argv and event parsing, provider storage with `0600`
   permissions, environment key fallback, ADB forward direction, plus headless
   panel and composer tests).
+- SMS from the live phone: the Messages tab read all 87 conversations the
+  phone's KDE Connect SMS plugin returned, grouped them with correct unread
+  counts, and loaded thread pages 50 messages at a time using
+  `requestConversation` and `conversationLoaded`. The same run was repeated
+  headlessly against the real daemon and produced the conversation list in the
+  real `MainWindow`. The parser was exercised on both of gdbus's quoting styles
+  because real message bodies contain apostrophes.
 - Agent chat against the live local **Zara Fast** llama.cpp server on this
   computer: a question sent from the panel streamed back token by token, the
   provider was auto-selected on startup, and the transcript, Stop button and
@@ -598,11 +645,13 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
 - Opening the real mounted folder in the desktop file manager: the mock run
   captured the `openUrl` call, and the real mount path was mounted, listed and
   unmounted directly, but Dolphin was not launched during the check.
-- Sending SMS through a real SIM. Ringing and pinging the real Galaxy S25 FE
-  were confirmed, and the real phone exposes the SMS plugin with the expected
-  signature, but no text was sent from the check so the owner's contacts were
-  not messaged. The volume path was exercised only against the mock daemon
-  because Android KDE
+- Sending SMS through a real SIM, from either the phone-actions dialog or the
+  Messages composer. Ringing and pinging the real Galaxy S25 FE were confirmed,
+  and the real phone exposes the SMS plugin with the expected signature, but no
+  text was sent from the check so the owner's contacts were not messaged.
+  Receiving a new message while the Messages tab was open was also not observed
+  live: the monitor parser is covered by unit tests. The volume path was
+  exercised only against the mock daemon because Android KDE
   Connect does not support computer-controlled phone volume; on a real Android
   phone the action is hidden.
 - Multiple phones at once; Phone Link selects one device.
@@ -692,9 +741,14 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   sends the phone app's own **Found it** broadcast. If adb is not connected,
   tap **Found it** on the phone. Sending SMS shells out to
   `gdbus` because PySide6 cannot express the SMS plugin's `avsavx` signature;
-  without `gdbus` the dialog explains what to install. Messages have no delivery
-  report, attachments are not supported, and a multi-SIM phone uses its default
-  SIM (the plugin's `-1`).
+  without `gdbus` the dialog and the Messages tab explain what to install.
+  Messages have no delivery report, attachments are not supported, and a
+  multi-SIM phone uses its default SIM (the plugin's `-1`). The Messages tab
+  reads the conversation list the phone reports; it does not archive messages
+  on the computer, so its history depends on what the KDE Connect SMS plugin
+  exposes. Unread counts and read state are the phone's. Attachment thumbnails
+  are not previewed, and RCS chats appear only if the phone app presents them
+  through the same SMS plugin.
 - **Phone volume** works only with a peer that implements Remote System Volume.
   Android's KDE Connect app (tested with 1.37.2) does not: its **System
   volume** plugin only lets the phone change the computer's volume, so Phone
@@ -876,18 +930,20 @@ above. Clipboard text goes only to the paired phone through KDE Connect, either
 when the clipboard button is pressed or while the optional auto-sync toggle is
 on. Phone files are read through a local sshfs mount over the paired KDE
 Connect connection. Text messages are handed to the phone through KDE Connect
-and sent by its own SIM, not by a web or cloud messaging service. There is no
-telemetry and no background network service. The agent chat is the only part of
-Phone Link that makes outbound network requests: when you send a message it
-contacts the provider you selected, and local and CLI providers stay on this
-machine.
+and sent by its own SIM, not by a web or cloud messaging service; the Messages
+tab reads conversations from the phone over the local D-Bus connection and
+keeps them in memory only. There is no telemetry and no background network
+service. The agent chat is the only part of Phone Link that makes outbound
+network requests.
 
 ## Project layout
 
 ```text
 phone_link/          application code
   agent.py           agent backends (HTTP streaming, CLI agents, provider store)
-  ui/                window, header, mirror stage, notification panel, agent chat
+  sms.py             SMS conversation client (gdbus calls and monitor parsing)
+  ui/                window, header, mirror stage, notification panel,
+                     Messages tab, agent chat
 tests/               unit tests, mock KDE daemon, fake adb/scrcpy, UI test
 run.sh               launcher
 README.md

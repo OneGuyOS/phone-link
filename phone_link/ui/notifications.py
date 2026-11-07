@@ -56,7 +56,7 @@ def notification_matches(item: NotificationItem, query: str) -> bool:
     return needle in haystack
 
 
-def _short_time(when: datetime) -> str:
+def short_time(when: datetime) -> str:
     now = datetime.now()
     delta = (now - when).total_seconds()
     if delta < 45:
@@ -115,7 +115,7 @@ class NotificationCard(QFrame):
         dot = QLabel("·", self)
         dot.setStyleSheet(f"color: {DIM};")
         meta.addWidget(dot)
-        stamp_text = _short_time(item.received_at)
+        stamp_text = short_time(item.received_at)
         if recent:
             stamp_text = f"{stamp_text} · cleared"
         stamp = QLabel(stamp_text, self)

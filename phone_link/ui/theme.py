@@ -687,6 +687,92 @@ QPushButton#AgentIconButton:hover {{
     background: {SURFACE_HOVER};
     color: {TEXT};
 }}
+QFrame#SmsConversation {{
+    background: {SURFACE_ALT};
+    border: 1px solid {BORDER};
+    border-radius: 12px;
+}}
+QFrame#SmsConversation:hover {{
+    background: {SURFACE_HOVER};
+    border-color: {BORDER_STRONG};
+}}
+QFrame#SmsConversation[unread="true"] {{
+    background: {ACCENT_SOFT};
+    border-color: #24536e;
+}}
+QLabel#SmsAddress {{
+    color: {TEXT};
+    font-size: 12px;
+    font-weight: 700;
+}}
+QLabel#SmsPreview {{
+    color: {MUTED};
+    font-size: 11px;
+}}
+QLabel#SmsPreview[failed="true"] {{
+    color: {DANGER};
+}}
+QLabel#SmsUnread {{
+    color: #07141d;
+    background: {ACCENT};
+    border-radius: 9px;
+    padding: 0 5px;
+    font-size: 10px;
+    font-weight: 700;
+}}
+QLabel#SmsThreadTitle {{
+    color: {TEXT};
+    font-size: 15px;
+    font-weight: 600;
+}}
+QLabel#SmsDay {{
+    color: {DIM};
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 4px 0;
+}}
+QFrame#SmsBubble {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+}}
+QFrame#SmsBubble[outgoing="true"] {{
+    background: {ACCENT_SOFT};
+    border-color: #23506a;
+}}
+QFrame#SmsBubble[failed="true"] {{
+    background: #2a161c;
+    border-color: #6b2b37;
+}}
+QLabel#SmsBubbleWho {{
+    color: {DIM};
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+}}
+QLabel#SmsBubbleTime {{
+    color: {DIM};
+    font-size: 9px;
+}}
+QLabel#SmsBubbleText {{
+    color: {TEXT};
+    font-size: 12px;
+}}
+QLabel#SmsAttachment {{
+    color: {ACCENT};
+    background: #0f151c;
+    border-radius: 5px;
+    padding: 3px 6px;
+    font-size: 10px;
+}}
+QPlainTextEdit#SmsComposer {{
+    font-size: 12px;
+}}
+QLabel#SmsError {{
+    color: {DANGER};
+    font-size: 11px;
+}}
 """
 
 
