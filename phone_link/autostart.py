@@ -21,7 +21,7 @@ def autostart_path() -> Path:
     return root / "autostart" / AUTOSTART_FILE
 
 
-def _exec_quote(value: str) -> str:
+def exec_quote(value: str) -> str:
     """Quote one argument for a desktop entry's ``Exec`` key."""
 
     escaped = (
@@ -47,7 +47,7 @@ def autostart_entry(
         "Type=Application",
         "Name=Phone Link",
         "Comment=Android phone companion",
-        f"Exec={_exec_quote(executable)} -m phone_link",
+        f"Exec={exec_quote(executable)} -m phone_link",
         "Icon=phone-link",
         "Terminal=false",
         "X-GNOME-Autostart-enabled=true",

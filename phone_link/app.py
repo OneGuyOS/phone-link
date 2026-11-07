@@ -11,6 +11,7 @@ configure_qt_platform()
 
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
+from . import __version__  # noqa: E402
 from .dependencies import check_dependencies  # noqa: E402
 from .ui.dialogs import DependencyDialog  # noqa: E402
 from .ui.icons import app_icon  # noqa: E402
@@ -20,6 +21,9 @@ from .ui.theme import apply_theme  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv if argv is None else argv)
+    if any(flag in {"--version", "-V"} for flag in arguments[1:]):
+        print(f"Phone Link {__version__}")
+        return 0
     app = QApplication(arguments)
     app.setApplicationName("Phone Link")
     app.setApplicationDisplayName("Phone Link")

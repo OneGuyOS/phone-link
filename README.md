@@ -107,6 +107,17 @@ cd ~/phone-link
 ./run.sh
 ```
 
+To add a launcher, application-menu entry and icon for the current user — no
+root — run:
+
+```bash
+./scripts/install.sh
+phone-link --version
+```
+
+`--prefix DIR` installs elsewhere and `--uninstall` removes the launcher, menu
+entry and icon again. The dependencies below are still required.
+
 Phone Link checks for `adb`, `scrcpy` and KDE Connect at startup. If something
 is missing, it explains what is missing and gives only the commands needed to
 fix it; you can still open the window and use whatever is available.
@@ -249,6 +260,29 @@ Or, equivalently:
 cd ~/phone-link
 python3 -m phone_link
 ```
+
+### 6. Add a launcher (optional)
+
+```bash
+./scripts/install.sh
+```
+
+This installs for the current user, without root:
+
+- `~/.local/bin/phone-link` — a launcher that records this checkout and the
+  Python interpreter it was installed with;
+- `~/.local/share/applications/phone-link.desktop` — the application-menu entry;
+- `~/.local/share/icons/hicolor/scalable/apps/phone-link.svg` — the icon.
+
+Make sure `~/.local/bin` is on `PATH` to type `phone-link`. Re-run the script
+after moving the checkout, or use `./scripts/install.sh --uninstall` to remove
+the launcher, menu entry and icon (autostart is separate). `--prefix DIR`
+installs somewhere other than `~/.local`.
+
+On other distributions, `pip install .` provides the same `phone-link` console
+script but no menu entry or icon. Phone Link is versioned `1.0.0`;
+`phone-link --version` prints it. Releases are built by hand — the app does not
+auto-update itself.
 
 ### Wayland note
 
@@ -702,7 +736,7 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 185 unit tests covering ADB parsing and selection, name/battery parsing,
+- 187 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
   values), scrcpy command construction for the mirror, DeX and floating
   windows, notification fallbacks, KDE snapshot state, recent-history ordering,
@@ -736,7 +770,8 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   snapshot (device, media, capped notifications and unread texts, truncation,
   and the built-in-only rule), close-to-tray (hiding, the one-time hint, quit
   marking the window first), the autostart entry (XDG path, quoting, enable and
-  disable), plus headless panel and composer tests).
+  disable), the version and `--version` entry point, plus headless panel and
+  composer tests).
 - SMS from the live phone: the Messages tab read all 87 conversations the
   phone's KDE Connect SMS plugin returned, grouped them with correct unread
   counts, and loaded thread pages 50 messages at a time using
@@ -793,6 +828,11 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   click the icon and restore a genuinely hidden window. Autostart was exercised
   against a temporary `XDG_CONFIG_HOME`, so nothing was enabled on this
   computer.
+- The installer end to end in a temporary prefix: `scripts/install.sh` wrote
+  the launcher, the desktop entry with a quoted `Exec`, and the icon; the
+  launcher answered `Phone Link 1.0.0`; and `--uninstall` removed the three
+  files. A pip dry run built the package metadata as `phone-link-1.0.0`. CI
+  repeats the entry-point and installer check on every push.
 
 ### What was not tested
 
@@ -1133,12 +1173,18 @@ built-in providers and is not written to disk.
 ```text
 phone_link/          application code
   agent.py           agent backends (HTTP streaming, CLI agents, provider store)
+  autostart.py       per-user XDG autostart entry
+  chat_store.py      the saved agent transcript
   local_server.py    finds and starts the local llama.cpp model
+  phone_context.py   the read-only phone snapshot for the agent
   sms.py             SMS conversation client (gdbus calls and monitor parsing)
   ui/                window, header, mirror stage, notification panel,
                      Messages tab, agent chat
+data/                desktop entry and icon used by the installer
+scripts/install.sh   installs the launcher, menu entry and icon for one user
+pyproject.toml       package metadata and the phone-link console script
 tests/               unit tests, mock KDE daemon, fake adb/scrcpy, UI test
-run.sh               launcher
+run.sh               launcher for running from a checkout
 README.md
 ```
 

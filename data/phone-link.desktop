@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Phone Link
+GenericName=Android Phone Companion
+Comment=Mirror and manage an Android phone
+Exec=@EXEC@
+Icon=phone-link
+Terminal=false
+Categories=Utility;Network;
+Keywords=android;phone;scrcpy;kdeconnect;messages;notifications;
