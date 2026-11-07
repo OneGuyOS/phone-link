@@ -11,16 +11,15 @@ Windows Phone Link. One window contains:
   it is rotated physically or with the button. A **speaker** button in the strip
   plays the phone's audio on the computer (off by default; toggling it briefly
   restarts the mirror).
+- **Pop out:** the **Pop out** button (or `Ctrl+Shift+P`) moves the current view
+  into its own decorated floating window and leaves the frame free: pop the
+  phone screen out to keep it on screen while the rest of Phone Link is used,
+  or pop DeX out while the normal phone mirror stays in the frame. **Dock**
+  brings it back. While the phone itself is popped out, the frame stops its
+  own stream, so the same screen is never encoded twice.
 - **DeX:** the **DeX** button switches the frame to Samsung's desktop mode on a
-  1080p virtual display, with the full launcher, taskbar and windows. **Pop
-  out** moves that desktop into its own decorated floating window and restores
-  the normal phone mirror in Phone Link, so both views stay usable at once.
-  **Dock** brings DeX back into the frame. The last mode is remembered.
-- **App streaming:** the **Apps** button lists the phone's launchable apps and
-  runs the chosen one on its own scrcpy virtual display in
-  the frame, leaving the phone's main screen free for something else. The button
-  becomes **Stop app** while an app is streaming. See
-  [App streaming](#app-streaming).
+  1080p virtual display, with the full launcher, taskbar and windows. The last
+  mode is remembered.
 - **Now playing:** a bar under the mirror shows the phone's current track and
   controls it — previous, play/pause, next, and a seek slider — through KDE
   Connect's MPRIS remote plugin.
@@ -94,8 +93,8 @@ controls and phone-file access are in place too: the now-playing bar drives the
 phone's player through KDE Connect's MPRIS remote plugin, and the Files button
 mounts the phone's internal storage with KDE Connect's SFTP plugin and opens it
 in the file manager. Samsung DeX can run in the frame or in a separate floating
-window alongside the normal phone mirror, and any launchable app can run on its
-own virtual display in the frame.
+window alongside the normal phone mirror, and the phone screen itself can pop
+out into its own window while the rest of Phone Link stays usable.
 Automatic clipboard sync works in both directions;
 it is off by default because it also forwards passwords and other sensitive
 copies. Phone actions (find, stop ringing, ping, SMS, mobile signal and, where
@@ -143,8 +142,7 @@ The status bar mentions them at startup, and **F1** opens the in-app list.
 | `F5` or `Ctrl+R` | Refresh the phone and notification state |
 | `Ctrl+Shift+R` | Rotate the mirrored phone screen |
 | `Ctrl+Shift+D` | Switch the mirror between the phone screen and DeX |
-| `Ctrl+Shift+P` | Pop the DeX desktop out, or dock it again |
-| `Ctrl+Shift+O` | Open an installed app on its own display, or stop it |
+| `Ctrl+Shift+P` | Pop the mirror or DeX out into its own window, or dock it |
 | `Ctrl+F` | Focus the notification search box |
 | `Ctrl+Shift+M` | Open the Messages tab |
 | `Ctrl+Shift+A` | Switch between the notifications and agent tabs |
@@ -437,33 +435,6 @@ Only still images under `DCIM/Camera` are imported. Videos, screenshots in
 it needs USB debugging or wireless debugging; KDE Connect by itself is not
 enough. The phone needs no extra app or permission beyond the normal ADB shell
 access.
-
----
-
-## App streaming
-
-The **Apps** button in the mirror strip (or **Ctrl+Shift+O**) lists every app
-with a launcher icon over ADB. Choose one and press **Open app**: Phone Link
-starts scrcpy with a new virtual display and launches that app on it. The app
-appears in the phone frame with normal mouse, touch and keyboard input, and the
-bottom **Back / Home / Recents** buttons act on the app's display. **Rotate**
-works there too.
-
-The phone's main screen stays available while the app runs in the frame, so the
-phone can show something else at the same time. Audio follows the speaker
-button, exactly like the normal mirror.
-
-While an app is streaming, the **Apps** button becomes **Stop app**. Press it
-to close the virtual display and return to the normal phone mirror. Turning on
-DeX also ends the app stream. App streaming is not remembered after Phone Link
-restarts; the next launch starts with the normal mirror.
-
-Android exposes package names to `adb shell`, but not the user-facing launcher
-labels without a companion app, so the picker lists package names and filters
-them as you type. For example, type `youtube`, `claude` or `spotify`. Streaming
-uses the app's normal Android permissions and does not grant it any new ones.
-Like DeX, it needs USB debugging or wireless debugging and a phone that lets
-scrcpy create a virtual display (Android 15 or newer with scrcpy 5).
 
 ---
 
@@ -775,10 +746,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   edge and clip its border and dismiss button.
 - Window state: closing the mock window wrote its geometry to the isolated test
   settings (`GEOMETRY_SAVED True`).
-- Shortcuts: all thirteen window shortcuts were registered (`F5`, `Ctrl+R`,
-  `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+Shift+O`, `Ctrl+F`,
-  `Ctrl+Shift+M`, `Ctrl+Shift+A`, `F11`, `F1`, `Ctrl+Q`, `Ctrl+W`), and the
-  shortcut dialog rendered with all thirteen entries offscreen.
+- Shortcuts: all twelve window shortcuts were registered (`F5`, `Ctrl+R`,
+  `Ctrl+Shift+R`, `Ctrl+Shift+D`, `Ctrl+Shift+P`, `Ctrl+F`, `Ctrl+Shift+M`,
+  `Ctrl+Shift+A`, `F11`, `F1`, `Ctrl+Q`, `Ctrl+W`), and the shortcut dialog
+  rendered with all eleven entries offscreen.
 - DeX: the mock run switched the frame to a 16:9 desktop, showed the Pop out
   button, popped DeX into a second fake scrcpy process while the main mirror
   stayed embedded, docked it again, and switched back to the phone frame. The
@@ -787,13 +758,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   mirror remained live in both cases. DeX right-clicks open context menus
   (`--mouse-bind=++++:bhsn`) instead of acting as Android Back, and the bottom
   navigation buttons act on the embedded desktop.
-- App streaming: the mock run opened the package picker, listed the fake ADB's
-  three apps, filtered them by package name, streamed `com.example.demo` on its
-  own virtual display in the portrait frame, sent navigation as scrcpy's
-  `MOD+h` shortcut, then used **Stop app** to return to the normal mirror. On
-  the real phone, `com.google.android.calculator` opened on a 1080×2340 scrcpy
-  virtual display, the frame stayed live, and **Stop app** restored the phone
-  mirror.
+- Pop out: with DeX off, **Pop out** moved the phone screen itself into a
+  second fake scrcpy process, stopped the embedded mirror, showed the **Phone
+  popped out** placeholder in the frame, and **Dock** restarted the embedded
+  phone mirror.
 - Error states: a simulated KDE Connect offline snapshot showed the
   **KDE Connect is offline** empty state with a visible **Try again** button
   wired to a full refresh.
@@ -875,12 +843,10 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   exposes the expected `sendSms(avsavx)` signature and Connectivity Report
   reported `LTE`. The daemon had **not** loaded Remote System Volume: the
   Android app has no plugin for computer-controlled phone volume.
-- 242 unit tests covering ADB parsing and selection, name/battery parsing,
+- 228 unit tests covering ADB parsing and selection, name/battery parsing,
   display-rotation parsing (including the window-manager fallback and invalid
-  values), scrcpy command construction for the mirror, DeX, app streaming and
-  floating windows, package-name validation and launchable-activity parsing,
-  the asynchronous app-list loader (success, empty/error output, missing adb and
-  cancellation), automatic wireless reconnection (same host, changed port, other
+  values), scrcpy command construction for the mirror, DeX and floating
+  windows, automatic wireless reconnection (same host, changed port, other
   hosts ignored, cooldown), which mirror owns DeX audio, camera-photo import
   (MediaStore row parsing and filtering, the date watermark, safe filenames,
   same-name/size deduplication, numeric suffixes, failed-pull retry, the
@@ -1067,13 +1033,9 @@ scrcpy 5.0.1, adb 34.0.5 and KDE Connect 25.04.2:
   Samsung launcher to show. Popping DeX out starts a second scrcpy process;
   closing the floating window turns DeX off and leaves the phone mirror
   running.
-- **App streaming** uses the same virtual-display support as DeX (Android 15
-  or newer with scrcpy 5). Apps are listed by package name because the Android
-  shell does not expose launcher labels. The mode is deliberately not
-  remembered across Phone Link restarts; **Stop app** (or turning on DeX)
-  returns to the phone mirror. The app keeps its normal phone permissions.
-  Starting it here does not force-stop another instance already running on the
-  phone.
+- **Pop out** works for the phone screen too: the frame stops its own mirror
+  while a second scrcpy process shows the phone in a decorated window, and
+  **Dock** (or closing that window) brings the stream back into the frame.
 - The phone frame follows the display rotation the phone reports, checked with
   the other ADB state every 2.5 seconds. After **Rotate** is pressed the frame
   switches immediately and holds that orientation for 2.2 seconds so an
@@ -1282,20 +1244,17 @@ folder or a browser link.
   embedded window with XTest (libXtst) after focusing it, so scrcpy performs its
   own rotation; the desktop's user-rotation setting is left alone. DeX adds
   `--new-display=1920x1080/240`, which creates the virtual display Samsung's
-  desktop mode attaches to. App streaming instead passes plain
-  `--new-display` plus `--start-app=<package>`, which gives the app its own
-  display without force-stopping an instance already on the phone. A second,
-  non-embedded scrcpy process owns that virtual display when DeX is popped out;
-  it leaves off `--window-borderless` so the window manager decorates and moves
-  it normally.
+  desktop mode attaches to. A second, non-embedded scrcpy process owns that
+  virtual display when DeX is popped out; it leaves off `--window-borderless`
+  so the window manager decorates and moves it normally. Popping out the phone
+  screen uses the same second process without `--new-display`, and stops the
+  embedded session so one display is never streamed twice.
 - `phone_link/ui/mirror.py` keeps the phone frame at a 9:19.5 aspect in
   portrait (the inverse in landscape) and a 16:9 frame for DeX, and resizes the
   embedded scrcpy window
-  to the new frame so the video re-fits. App streaming reuses the portrait
-  frame and keeps the app's package in the session state, so stopping it simply
-  restarts scrcpy without `--new-display`. After a resize settles it asks
-  scrcpy to repaint (an X11 expose), because scrcpy can otherwise keep the old
-  frame in a corner of the resized window.
+  to the new frame so the video re-fits. After a resize settles it asks scrcpy
+  to repaint (an X11 expose), because scrcpy can otherwise keep the old frame
+  in a corner of the resized window.
 - `phone_link/kdeconnect.py` talks only to the running
   `org.kde.kdeconnect` D-Bus service: device properties, the battery interface,
   `activeNotifications()`, notification properties, `dismiss()`, `sendReply()`,
@@ -1351,7 +1310,6 @@ built-in providers and is not written to disk.
 ```text
 phone_link/          application code
   agent.py           agent backends (HTTP streaming, CLI agents, provider store)
-  apps.py            installed-app listing for app streaming
   autostart.py       per-user XDG autostart entry
   chat_store.py      the saved agent transcript
   local_server.py    finds and starts the local llama.cpp model

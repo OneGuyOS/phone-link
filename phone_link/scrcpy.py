@@ -14,7 +14,6 @@ from PySide6.QtCore import (
     Signal,
 )
 
-from .apps import is_valid_package
 from .x11 import X11Display, X11Error
 
 # A 1080p virtual display at 240 dpi gives Samsung's desktop mode
@@ -47,7 +46,6 @@ class ScrcpySession(QObject):
         self._height = 1
         self._audio = False
         self._dex = False
-        self._app: str | None = None
         self._floating = False
         self._floating_live = False
         self._log_tail = ""
@@ -96,7 +94,6 @@ class ScrcpySession(QObject):
         audio: bool | None = None,
         dex: bool = False,
         floating: bool = False,
-        app: str | None = None,
     ) -> None:
         self.stop(silent=True)
         if audio is not None:
@@ -111,15 +108,11 @@ class ScrcpySession(QObject):
         self._height = max(1, int(height))
         self._dex = bool(dex)
         self._floating = bool(floating)
-        self._app = app if app and not self._dex else None
         self._floating_live = False
         self._log_tail = ""
 
         if not self.scrcpy_path:
             self.statusChanged.emit("failed", "scrcpy is not installed. See the setup instructions.")
-            return
-        if self._app is not None and not is_valid_package(self._app):
-            self.statusChanged.emit("failed", "That is not a valid Android package name.")
             return
         if not self._floating and parent_xid == 0:
             self.statusChanged.emit("failed", "The screen container is not ready yet.")
@@ -163,7 +156,6 @@ class ScrcpySession(QObject):
             dex=self._dex,
             floating=self._floating,
             audio=self._audio,
-            app=self._app,
         )
         self._elapsed.start()
         self._stopping = False
@@ -173,12 +165,7 @@ class ScrcpySession(QObject):
             self._floating_timer.start()
         else:
             self._poll.start()
-            self.statusChanged.emit(
-                "starting",
-                "Starting the app on its own display…"
-                if self._app
-                else "Starting scrcpy and waiting for the phone.",
-            )
+            self.statusChanged.emit("starting", "Starting scrcpy and waiting for the phone.")
         process.start(self.scrcpy_path, args)
 
     def set_geometry(self, width: int, height: int) -> None:
@@ -350,19 +337,11 @@ class ScrcpySession(QObject):
             return
 
         if was_embedded:
-            prefix = "The app stream disconnected." if self._app else "The mirror disconnected."
+            prefix = "The mirror disconnected."
         elif crashed:
-            prefix = (
-                "scrcpy crashed while starting the app stream."
-                if self._app
-                else "scrcpy crashed while starting the mirror."
-            )
+            prefix = "scrcpy crashed while starting the mirror."
         else:
-            prefix = (
-                "scrcpy could not start the app stream."
-                if self._app
-                else "scrcpy could not start the mirror."
-            )
+            prefix = "scrcpy could not start the mirror."
         detail = _friendly_failure(self._log_tail)
         suffix = f" {detail}" if detail else ""
         if crashed and not detail and was_embedded:
@@ -405,9 +384,8 @@ def build_scrcpy_args(
     dex: bool = False,
     floating: bool = False,
     audio: bool = False,
-    app: str | None = None,
 ) -> list[str]:
-    """Build the scrcpy command line for one mirror, DeX or app window."""
+    """Build the scrcpy command line for one mirror or DeX window."""
 
     title = (
         # scrcpy publishes its title through the legacy WM_NAME property,
@@ -441,14 +419,6 @@ def build_scrcpy_args(
         # clicks instead of scrcpy's phone defaults (right-click = Back).
         args.append(f"--new-display={DEX_DISPLAY}")
         args.append("--mouse-bind=++++:bhsn")
-    elif app:
-        # Start the app on a fresh virtual display so it does not disturb the
-        # phone's own screen.  Do not force-stop it: the phone may be using the
-        # app at the same time, and scrcpy can run another task for it.
-        if not is_valid_package(app):
-            raise ValueError(f"Invalid Android package name: {app!r}")
-        args.append("--new-display")
-        args.append(f"--start-app={app}")
     if not floating:
         # The embedded window must be borderless so it looks like part of the
         # Qt panel; a floating window keeps its normal decorations.
@@ -475,10 +445,6 @@ def _friendly_failure(log: str) -> str:
         return "The phone could not capture its audio. Turn the speaker button off and try again."
     if "unauthorized" in lower:
         return "Unlock the phone and accept the USB debugging authorization prompt."
-    if "could not start app" in lower or (
-        "app" in lower and "not found" in lower
-    ):
-        return "The phone could not start that app. Pick another one and try again."
     if "no devices" in lower or ("could not find" in lower and "adb device" in lower):
         return "No ADB device is connected."
     if "device disconnected" in lower or "disconnected" in lower:

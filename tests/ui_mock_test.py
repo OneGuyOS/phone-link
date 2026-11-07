@@ -284,68 +284,42 @@ def main() -> int:
                 popout.isVisible(),
             )
 
-            # The app picker lists packages from the fake ADB and filters them.
-            from phone_link.ui.app_stream import AppStreamDialog
-
-            picker = AppStreamDialog(
-                window.report.adb_path,
-                window._adb_snapshot.selected.serial,
-                window,
+            # With DeX off, Pop out must move the phone screen itself into the
+            # floating window and leave the frame free.
+            popout.click()
+            phone_popped = wait_until(
+                lambda: window.mirror.is_floating
+                and window.mirror._float_kind == "phone"
+                and window.mirror._float_session.is_running
+                and not window.mirror.is_mirroring
             )
-            picker_loaded = wait_until(lambda: picker.app_list.count() >= 3)
-            picker.search.setText("demo")
-            picker_filtered = wait_until(lambda: picker.app_list.count() == 1)
-            picker.app_list.setCurrentRow(0)
             print(
-                "APP_PICKER",
-                picker_loaded,
-                picker_filtered,
-                picker.selected_package(),
-                picker.status.text(),
+                "PHONE_POPOUT",
+                phone_popped,
+                window.mirror.is_floating,
+                window.mirror.is_mirroring,
+                window.mirror._float_kind,
+                window.mirror.stage.placeholder.title.text(),
+                popout.text(),
+                popout.isChecked(),
+                popout.isEnabled(),
             )
-            picker.deleteLater()
 
-            apps = window.mirror.apps
-            window.mirror.stream_app("com.example.demo")
-            app_on = wait_until(
-                lambda: window.mirror.is_mirroring
-                and window.mirror._session._app == "com.example.demo"
+            popout.click()
+            phone_docked = wait_until(
+                lambda: not window.mirror.is_floating
+                and window.mirror.is_mirroring
                 and not window.mirror._session._dex
+                and not window.mirror._float_session.is_running
             )
             print(
-                "APP_STREAM",
-                app_on,
-                window.mirror.is_app_streaming,
-                window.mirror.app_package,
-                apps.text(),
-                window.mirror.stage.is_desktop,
-                window.mirror._session._app,
-            )
-
-            # Navigation must address the app's virtual display, not the
-            # phone's main display.
-            SCRCPY_KEYS.unlink(missing_ok=True)
-            window.mirror.nav.buttons["home"].click()
-            nav_app = wait_until(
-                lambda: SCRCPY_KEYS.exists()
-                and "alt+h" in SCRCPY_KEYS.read_text(encoding="utf-8"),
-                timeout=4.0,
-            )
-            print("NAV_APP", nav_app)
-
-            apps.click()
-            app_off = wait_until(
-                lambda: window.mirror.is_mirroring
-                and not window.mirror.is_app_streaming
-                and window.mirror._session._app is None
-                and apps.text() == "Apps"
-            )
-            print(
-                "APP_STOP",
-                app_off,
-                window.mirror.is_app_streaming,
-                window.mirror._session._app,
-                apps.text(),
+                "PHONE_DOCKED",
+                phone_docked,
+                window.mirror.is_floating,
+                window.mirror.is_mirroring,
+                window.mirror._float_kind,
+                popout.text(),
+                popout.isChecked(),
             )
 
             rotate = window.mirror.rotate

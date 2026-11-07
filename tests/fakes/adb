@@ -103,27 +103,6 @@ def main() -> int:
             log(f"broadcast {device_id}")
             sys.stdout.write("Broadcast completed: result=0\n")
             return 0
-        if rest[:3] == ["shell", "cmd", "package"]:
-            sys.stdout.write(
-                "3 activities found:\n"
-                "  Activity #0:\n"
-                "    priority=0 preferredOrder=0 match=0x108000 isDefault=true\n"
-                "    com.example.demo/.MainActivity\n"
-                "  Activity #1:\n"
-                "    priority=0 preferredOrder=0 match=0x108000 isDefault=true\n"
-                "    com.anthropic.claude/.MainActivity\n"
-                "  Activity #2:\n"
-                "    priority=0 preferredOrder=0 match=0x108000 isDefault=true\n"
-                "    org.mozilla.firefox/.App\n"
-            )
-            return 0
-        if rest[:4] == ["shell", "pm", "list", "packages"]:
-            sys.stdout.write(
-                "package:com.example.demo\n"
-                "package:com.anthropic.claude\n"
-                "package:org.mozilla.firefox\n"
-            )
-            return 0
         if rest and rest[0] == "shell":
             sys.stdout.write(shell_info())
             return 0

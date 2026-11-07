@@ -46,7 +46,6 @@ from ..photos import (
 from ..sms import SmsClient
 from ..wifi import WirelessReconnector
 from .agent_panel import AgentPanel
-from .app_stream import AppStreamDialog
 from .dialogs import ShortcutsDialog
 from .header import HeaderBar
 from .icons import app_icon
@@ -144,7 +143,6 @@ class MainWindow(QMainWindow):
         self.mirror.retryRequested.connect(self._retry_mirror)
         self.mirror.rotationFailed.connect(self._flash)
         self.mirror.notice.connect(self._flash)
-        self.mirror.appsRequested.connect(self._open_app_picker)
         left_layout.addWidget(self.mirror, 1)
 
         self.media = MediaBar(left_column)
@@ -363,7 +361,6 @@ class MainWindow(QMainWindow):
             ("Ctrl+Shift+R", self._rotate_screen),
             ("Ctrl+Shift+D", self._toggle_desktop),
             ("Ctrl+Shift+P", self._toggle_popout),
-            ("Ctrl+Shift+O", self._open_app_picker),
             ("Ctrl+F", self._focus_search),
             ("Ctrl+Shift+M", lambda: self._show_right_tab(1)),
             ("Ctrl+Shift+A", self._toggle_right_tab),
@@ -411,32 +408,10 @@ class MainWindow(QMainWindow):
         self.mirror.toggle_desktop()
 
     def _toggle_popout(self) -> None:
-        if not self.mirror.is_desktop:
-            self._flash("Turn on DeX before popping it out.")
+        if self.mirror.serial is None:
+            self._flash("Connect the phone before popping out the mirror.")
             return
         self.mirror.toggle_popout()
-
-    def _open_app_picker(self) -> None:
-        if self.mirror.is_app_streaming:
-            self.mirror.stop_app_stream()
-            return
-        device = self._adb_snapshot.selected
-        if device is None:
-            self._flash("Connect the phone before opening an app.")
-            return
-        dialog = AppStreamDialog(
-            self.report.adb_path,
-            device.serial,
-            self,
-            current=self.mirror.app_package,
-        )
-        try:
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                package = dialog.selected_package()
-                if package:
-                    self.mirror.stream_app(package)
-        finally:
-            dialog.deleteLater()
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():

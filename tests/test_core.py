@@ -395,10 +395,6 @@ class FailureMessageTests(unittest.TestCase):
         )
         self.assertEqual(message, "")
 
-    def test_missing_app_has_a_useful_message(self) -> None:
-        message = _friendly_failure("ERROR: Could not start app: com.example.missing")
-        self.assertIn("could not start that app", message)
-
 
 class NotificationHistoryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -706,24 +702,6 @@ class ScrcpyCommandTests(unittest.TestCase):
         # scrcpy publishes WM_NAME as a Latin-1 string, so a non-ASCII dash
         # would show up as "â€”" in the title bar.
         self.assertTrue(title.isascii())
-
-    def test_embedded_app_stream_uses_a_virtual_display(self) -> None:
-        args = self.build(app="com.example.demo")
-        self.assertIn("--new-display", args)
-        self.assertIn("--start-app=com.example.demo", args)
-        self.assertIn("--window-borderless", args)
-        self.assertNotIn(f"--new-display={DEX_DISPLAY}", args)
-        # Phone-style interaction: right-click remains Back in the app.
-        self.assertNotIn("--mouse-bind=++++:bhsn", args)
-
-    def test_app_stream_rejects_an_invalid_package(self) -> None:
-        with self.assertRaises(ValueError):
-            self.build(app="not a package")
-
-    def test_dex_wins_over_an_app_stream(self) -> None:
-        args = self.build(dex=True, app="com.example.demo")
-        self.assertIn(f"--new-display={DEX_DISPLAY}", args)
-        self.assertFalse(any(arg.startswith("--start-app=") for arg in args))
 
     def test_audio_only_when_requested(self) -> None:
         args = self.build(audio=True)
